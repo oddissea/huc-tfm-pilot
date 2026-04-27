@@ -41,17 +41,11 @@ if [ -d "${DATA_PATH}/conf/live/${DOMAIN}" ]; then
     fi
 fi
 
-# 1. Descargar opciones SSL recomendadas si no existen.
-if [ ! -e "${DATA_PATH}/conf/options-ssl-nginx.conf" ] || [ ! -e "${DATA_PATH}/conf/ssl-dhparams.pem" ]; then
-    echo "### Descargando opciones SSL recomendadas..."
-    mkdir -p "${DATA_PATH}/conf"
-    curl -sS "https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/src/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf" \
-        > "${DATA_PATH}/conf/options-ssl-nginx.conf"
-    curl -sS "https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem" \
-        > "${DATA_PATH}/conf/ssl-dhparams.pem"
-fi
+# Limpiar restos de un intento anterior (evita choques con dummy certs huérfanos).
+mkdir -p "${DATA_PATH}/conf"
+rm -f "${DATA_PATH}/conf/options-ssl-nginx.conf" "${DATA_PATH}/conf/ssl-dhparams.pem"
 
-# 2. Crear certificado dummy temporal.
+# 1. Crear certificado dummy temporal.
 echo "### Creando certificado dummy para ${DOMAIN}..."
 PATH_LIVE="/etc/letsencrypt/live/${DOMAIN}"
 mkdir -p "${DATA_PATH}/conf/live/${DOMAIN}"
@@ -61,18 +55,19 @@ docker compose run --rm --entrypoint "\
         -out '${PATH_LIVE}/fullchain.pem' \
         -subj '/CN=localhost'" certbot
 
-# 3. Arrancar nginx con el cert dummy.
+# 2. Arrancar nginx con el cert dummy. Re-crea el container si ya existía
+#    (necesario para que recoja la config tras un fix).
 echo "### Arrancando nginx con certificado dummy..."
-docker compose up -d nginx
+docker compose up -d --force-recreate nginx
 
-# 4. Borrar cert dummy (certbot necesita tener el directorio limpio).
+# 3. Borrar cert dummy (certbot necesita tener el directorio limpio).
 echo "### Borrando certificado dummy..."
 docker compose run --rm --entrypoint "\
     rm -Rf /etc/letsencrypt/live/${DOMAIN} && \
     rm -Rf /etc/letsencrypt/archive/${DOMAIN} && \
     rm -Rf /etc/letsencrypt/renewal/${DOMAIN}.conf" certbot
 
-# 5. Pedir cert real a Let's Encrypt.
+# 4. Pedir cert real a Let's Encrypt.
 echo "### Solicitando certificado real a Let's Encrypt..."
 STAGING_ARG=""
 if [ "${STAGING}" -ne 0 ]; then
@@ -89,7 +84,7 @@ docker compose run --rm --entrypoint "\
         --force-renewal \
         --non-interactive" certbot
 
-# 6. Recargar nginx para que lea el cert real.
+# 5. Recargar nginx para que lea el cert real.
 echo "### Recargando nginx con el cert real..."
 docker compose exec nginx nginx -s reload
 
