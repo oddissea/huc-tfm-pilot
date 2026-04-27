@@ -242,9 +242,10 @@ certbot/www/*
 
 # Modelos PyTorch (pesos), datos de inferencia, cachés (los del piloto real
 # se descargarán desde GCS al arranque del container, no van por git).
-models/
-data/
-weights/
+# IMPORTANTE: usar '/' inicial para que matcheen solo top-level y no carpetas
+# del código fuente como `src/models/` o `src/data/`.
+/weights/
+/data/
 *.pt
 *.pth
 *.h5
@@ -253,5 +254,4 @@ weights/
 *.log
 logs/
 
-# Cache de pesos descargados de GCS (mounted volume del container app)
-weights/
+# (Cache de pesos descargados de GCS ya cubierto por /weights/ arriba.)
