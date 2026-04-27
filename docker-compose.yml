@@ -6,6 +6,10 @@ services:
     expose:
       - "8501"
     restart: unless-stopped
+    volumes:
+      # Cache de pesos del modelo (~151 MB, F4 + 25 AttnMIL). Persistencia
+      # entre reinicios del container para no re-descargar de GCS cada vez.
+      - ./weights:/app/weights
     deploy:
       resources:
         reservations:

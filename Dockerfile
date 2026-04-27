@@ -1,10 +1,23 @@
 FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
+# System deps:
+# - libglib2.0-0: required by opencv-python-headless at runtime
+# - ca-certificates, curl: HTTPS calls to GCS / pip indexes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Source code (model classes, tiff_to_h5).
+COPY src/ ./src/
+
+# App entry point.
 COPY app.py .
 
 EXPOSE 8501

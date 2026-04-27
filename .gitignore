@@ -252,3 +252,6 @@ weights/
 # Logs locales si se generan.
 *.log
 logs/
+
+# Cache de pesos descargados de GCS (mounted volume del container app)
+weights/
