@@ -32,7 +32,10 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Generar contraseña aleatoria de 16 caracteres alfanuméricos.
-PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+# Nota: usamos Python's `secrets` (criptográficamente seguro) en vez de
+# `tr -dc ... < /dev/urandom | head -c N` porque ese pipeline produce
+# SIGPIPE en `tr` y, con `set -o pipefail`, el script muere en silencio.
+PASSWORD=$(python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16)))")
 
 # Generar hash bcrypt con httpd:alpine (evita depender de apache2-utils en el host).
 HASH=$(docker run --rm httpd:alpine htpasswd -nbB "${USER}" "${PASSWORD}" | tr -d '\r')
