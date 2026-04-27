@@ -36,11 +36,13 @@ Tras tener Docker + NVIDIA Container Toolkit instalados (ver bitácora):
 git clone https://github.com/oddissea/huc-tfm-pilot.git ~/huc-tfm-pilot
 cd ~/huc-tfm-pilot
 
-# 1. Crear los usuarios BasicAuth iniciales (eduardo, nasser, andres, luis, carlos).
-for user in eduardo nasser andres luis carlos; do
-    ./scripts/add_user.sh "$user"
-done
-# Anota cada contraseña que sale en pantalla y compártela con quien toque por canal seguro.
+# 1. Crear los 5 usuarios BasicAuth iniciales y guardar sus contraseñas en un
+#    fichero local gitignored (.credentials.local). Después de distribuirlas
+#    manualmente por canal seguro, borra ese fichero.
+./scripts/bootstrap_users.sh
+
+# Si solo quieres añadir uno suelto en otro momento:
+# ./scripts/add_user.sh nombre_usuario
 
 # 2. Bootstrap inicial de Let's Encrypt (genera el primer certificado).
 #    Recomendado primero en STAGING para confirmar que todo va antes de gastar rate limit.

@@ -225,6 +225,13 @@ __marimo__/
 nginx/.htpasswd
 nginx/.htpasswd.bak
 
+# Ficheros con secretos / variables locales — NUNCA al repo público.
+.env
+.env.*
+.credentials
+.credentials.*
+*.credentials
+
 # Certificados Let's Encrypt y challenges. Datos de runtime, ocupan espacio
 # y contienen claves privadas — fuera del repo. Solo se mantienen los
 # directorios vacíos como placeholder con .gitkeep.
