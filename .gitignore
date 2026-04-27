@@ -216,3 +216,32 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ============================================================================
+# Despliegue (HUC TFM Pilot)
+# ============================================================================
+
+# Credenciales BasicAuth — NUNCA al repo público.
+nginx/.htpasswd
+nginx/.htpasswd.bak
+
+# Certificados Let's Encrypt y challenges. Datos de runtime, ocupan espacio
+# y contienen claves privadas — fuera del repo. Solo se mantienen los
+# directorios vacíos como placeholder con .gitkeep.
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep
+
+# Modelos PyTorch (pesos), datos de inferencia, cachés (los del piloto real
+# se descargarán desde GCS al arranque del container, no van por git).
+models/
+data/
+weights/
+*.pt
+*.pth
+*.h5
+
+# Logs locales si se generan.
+*.log
+logs/
