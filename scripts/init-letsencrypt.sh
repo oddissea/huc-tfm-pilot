@@ -61,11 +61,11 @@ echo "### Arrancando nginx con certificado dummy..."
 docker compose up -d --force-recreate nginx
 
 # 3. Borrar cert dummy (certbot necesita tener el directorio limpio).
+# Usamos /bin/sh -c en vez de pasar comandos directos al --entrypoint porque
+# la imagen certbot/certbot ejecuta su entrypoint sin shell, así que
+# operadores como `&&` se pasan literales al binario y no se interpretan.
 echo "### Borrando certificado dummy..."
-docker compose run --rm --entrypoint "\
-    rm -Rf /etc/letsencrypt/live/${DOMAIN} && \
-    rm -Rf /etc/letsencrypt/archive/${DOMAIN} && \
-    rm -Rf /etc/letsencrypt/renewal/${DOMAIN}.conf" certbot
+docker compose run --rm --entrypoint "/bin/sh" certbot -c "rm -rf /etc/letsencrypt/live/${DOMAIN} /etc/letsencrypt/archive/${DOMAIN} /etc/letsencrypt/renewal/${DOMAIN}.conf /etc/letsencrypt/live/${DOMAIN}-* /etc/letsencrypt/archive/${DOMAIN}-* /etc/letsencrypt/renewal/${DOMAIN}-*.conf"
 
 # 4. Pedir cert real a Let's Encrypt.
 echo "### Solicitando certificado real a Let's Encrypt..."
@@ -74,15 +74,7 @@ if [ "${STAGING}" -ne 0 ]; then
     STAGING_ARG="--staging"
 fi
 
-docker compose run --rm --entrypoint "\
-    certbot certonly --webroot -w /var/www/certbot \
-        ${STAGING_ARG} \
-        --email ${EMAIL} \
-        -d ${DOMAIN} \
-        --rsa-key-size ${RSA_KEY_SIZE} \
-        --agree-tos \
-        --force-renewal \
-        --non-interactive" certbot
+docker compose run --rm --entrypoint "/bin/sh" certbot -c "certbot certonly --webroot -w /var/www/certbot ${STAGING_ARG} --email ${EMAIL} -d ${DOMAIN} --cert-name ${DOMAIN} --rsa-key-size ${RSA_KEY_SIZE} --agree-tos --force-renewal --non-interactive"
 
 # 5. Recargar nginx para que lea el cert real.
 echo "### Recargando nginx con el cert real..."
