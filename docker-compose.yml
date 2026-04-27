@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    image: huc-pilot:dev
+    container_name: huc-pilot-app
+    ports:
+      - "127.0.0.1:8501:8501"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
