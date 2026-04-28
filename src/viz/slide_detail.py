@@ -224,35 +224,42 @@ def _attention_scatter(
 
     `positions` se asume (N, 2) con (y, x) esquinas. Invertimos Y para que el
     norte del slide quede arriba (consistente con cómo se ven las miniaturas
-    de microscopía).
+    de microscopía). Hover incluye el índice `#i` del parche para poder
+    cruzar con los thumbnails del top-K.
     """
     if positions.shape[1] >= 2:
         ys, xs = positions[:, 0], positions[:, 1]
     else:
-        # fallback raro
         ys, xs = np.arange(len(attention)), np.zeros(len(attention))
 
-    # Normalizar atención a [0,1] para el colorbar (relativa a este slide)
-    if attention.max() > attention.min():
-        attn_norm = (attention - attention.min()) / (attention.max() - attention.min())
-    else:
-        attn_norm = np.zeros_like(attention)
+    a_max = float(attention.max()) or 1.0
+    rel = attention / a_max  # fracción del máximo del slide
 
     has_labels = bool((categories != "?").any() and (categories != "XXX").any())
-    customdata = np.stack(
-        [attention, attn_norm, categories], axis=-1,
-    ) if has_labels else np.stack([attention, attn_norm], axis=-1)
+    n = len(attention)
+    idx_arr = np.arange(n)
 
-    hover = (
-        "x=%{x}, y=%{y}<br>"
-        "atención=%{customdata[0]:.4f} (norm %{customdata[1]:.2f})"
-        + ("<br>cat=%{customdata[2]}" if has_labels else "")
-        + "<extra></extra>"
-    )
+    if has_labels:
+        customdata = np.column_stack([idx_arr, attention, rel, categories])
+        hover = (
+            "#%{customdata[0]}<br>"
+            "x=%{x}, y=%{y}<br>"
+            "atención=%{customdata[1]:.4f} "
+            "(%{customdata[2]:.0%} del máximo)<br>"
+            "categoría=%{customdata[3]}<extra></extra>"
+        )
+    else:
+        customdata = np.column_stack([idx_arr, attention, rel])
+        hover = (
+            "#%{customdata[0]}<br>"
+            "x=%{x}, y=%{y}<br>"
+            "atención=%{customdata[1]:.4f} "
+            "(%{customdata[2]:.0%} del máximo)<extra></extra>"
+        )
 
     fig = go.Figure(go.Scatter(
         x=xs,
-        y=-ys,   # invertir Y
+        y=-ys,
         mode="markers",
         marker=dict(
             size=11,
@@ -271,6 +278,66 @@ def _attention_scatter(
         yaxis=dict(title="y (px, invertido)", showgrid=False),
         height=520,
         margin=dict(l=10, r=10, t=50, b=20),
+    )
+    return fig
+
+
+def _attention_overlay_figure(
+    positions: np.ndarray,
+    attention: np.ndarray,
+    patches_orig: np.ndarray,
+    patch_raw_size: int,
+    pred_class: str,
+    thumb_size: int = 48,
+    opacity: float = 0.85,
+) -> go.Figure:
+    """Versión Plotly del overlay TFM. Encima del mosaico se superpone una
+    capa invisible de scatter centrada en cada parche para dar hover con
+    `#índice` y `atención` — así se puede cruzar con los thumbnails del
+    top-K. Sin botón de pantalla completa de Streamlit (Plotly trae su
+    propia barra de zoom/pan).
+    """
+    overlay = _attention_overlay(
+        positions, attention, patches_orig, patch_raw_size, pred_class,
+        thumb_size=thumb_size, opacity=opacity,
+    )
+    h, w, _ = overlay.shape
+
+    pos = np.asarray(positions, dtype=np.int64)
+    n = len(pos)
+    y_min, x_min = int(pos[:, 0].min()), int(pos[:, 1].min())
+    rows = (pos[:, 0] - y_min) // patch_raw_size
+    cols = (pos[:, 1] - x_min) // patch_raw_size
+
+    s = thumb_size
+    centers_x = cols * s + s / 2
+    centers_y = rows * s + s / 2
+
+    a_max = float(attention.max()) or 1.0
+    rel = attention / a_max
+    customdata = np.column_stack([np.arange(n), attention, rel])
+
+    fig = go.Figure()
+    fig.add_trace(go.Image(z=overlay, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(
+        x=centers_x,
+        y=centers_y,
+        mode="markers",
+        marker=dict(size=max(8, s * 0.7), color="rgba(0,0,0,0)"),
+        customdata=customdata,
+        hovertemplate=(
+            "#%{customdata[0]}<br>"
+            "atención=%{customdata[1]:.4f} "
+            "(%{customdata[2]:.0%} del máximo)<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        height=min(700, max(320, h)),
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis=dict(visible=False, range=[0, w]),
+        yaxis=dict(visible=False, range=[h, 0]),
+        dragmode="pan",
     )
     return fig
 
@@ -326,6 +393,9 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
 
     # Overlay tipo TFM: mosaico de los parches reales + capa coloreada
     # según clase predicha, alpha proporcional a la atención normalizada.
+    # Se renderiza con Plotly para que el hover muestre #índice + atención
+    # (cruzable con los thumbnails del top-K) y para evitar el modal de
+    # pantalla completa de st.image.
     originals = _load_all_originals(job)
     if originals is not None:
         patches_arr, patch_size = originals
@@ -333,12 +403,16 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             st.markdown(
                 f"**Mapa de atención sobre el slide** "
                 f"— color de la clase predicha ({pred_class}), "
-                f"intensidad ∝ atención del AttnMIL."
+                f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
+                "ver el índice del parche."
             )
-            overlay = _attention_overlay(
-                positions, attention, patches_arr, patch_size, pred_class,
+            st.plotly_chart(
+                _attention_overlay_figure(
+                    positions, attention, patches_arr, patch_size, pred_class,
+                ),
+                use_container_width=True,
+                config={"displayModeBar": True, "scrollZoom": True},
             )
-            st.image(overlay, use_container_width=True)
 
     # Top-K parches por atención (debajo del overlay para contexto detallado)
     st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
