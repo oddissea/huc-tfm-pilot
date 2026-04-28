@@ -17,7 +17,6 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 import torch
-from streamlit_autorefresh import st_autorefresh
 
 from src.inference.model import CLASS_NAMES
 from src.inference.predict import predict_synthetic
@@ -152,23 +151,21 @@ def _read_result(job) -> dict | None:
         return None
 
 
-jobs = manager.list_jobs()
+@st.fragment(run_every=2)
+def _render_queue():
+    """Tabla de cola que se auto-rerenderiza cada 2 s mientras haya jobs activos.
 
-if not jobs:
-    st.info("La cola está vacía. Sube algún fichero para empezar.")
-else:
-    # Auto-refresh mientras haya algo activo. Los modelos pendientes de carga
-    # también cuentan como "activo" para que el patólogo vea el estado avanzar
-    # en cuanto cargue.
-    has_active = (
-        any(j.status in ACTIVE_STATES for j in jobs)
-        or (not models_loaded() and any(j.status == JobStatus.READY_FOR_INFERENCE for j in jobs))
-    )
-    if has_active:
-        st_autorefresh(interval=2000, key="queue_refresh")
+    Streamlit re-ejecuta solo este fragmento; el resto de la página queda
+    quieto. No depende de componentes externos (el wrapper original
+    `streamlit-autorefresh` no carga bien tras nginx + BasicAuth).
+    """
+    jobs_local = manager.list_jobs()
+    if not jobs_local:
+        st.info("La cola está vacía. Sube algún fichero para empezar.")
+        return
 
     rows = []
-    for j in jobs:
+    for j in jobs_local:
         result = _read_result(j) if j.status == JobStatus.DONE else None
         if result is not None:
             pred_class = result["predicted_class"]
@@ -196,6 +193,11 @@ else:
     df = pd.DataFrame(rows)
     st.dataframe(df, hide_index=True, use_container_width=True)
 
+
+_render_queue()
+jobs = manager.list_jobs()
+
+if jobs:
     failed_jobs = [j for j in jobs if j.status == JobStatus.FAILED]
     if failed_jobs:
         with st.expander(f"Errores ({len(failed_jobs)})"):
