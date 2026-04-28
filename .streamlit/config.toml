@@ -1,0 +1,8 @@
+[server]
+# Subir límites para portaobjetos H5 grandes (CAR llega a ~2 GB).
+# nginx ya tiene client_max_body_size 0 (ilimitado).
+maxUploadSize = 4096        # MB
+maxMessageSize = 4096       # MB (websocket inbound, debe ser >= maxUploadSize)
+
+[browser]
+gatherUsageStats = false

@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Source code (model classes, tiff_to_h5).
 COPY src/ ./src/
 
+# Streamlit config (upload limits, telemetría).
+COPY .streamlit/ ./.streamlit/
+
 # App entry point.
 COPY app.py .
 
