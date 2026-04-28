@@ -174,7 +174,13 @@ def _render_queue():
             pred_str = f"{pred_class} · {conf:.1%}"
             n_patches = result.get("n_patches", "")
             elapsed = result.get("elapsed_seconds")
-            elapsed_str = f"{elapsed:.1f} s" if elapsed is not None else ""
+            conv = j.extra.get("conversion_seconds")
+            if elapsed is None:
+                elapsed_str = ""
+            elif conv is not None:
+                elapsed_str = f"{conv:.1f} s + {elapsed:.1f} s"
+            else:
+                elapsed_str = f"{elapsed:.1f} s"
         else:
             pred_str = ""
             n_patches = j.extra.get("n_patches", "")

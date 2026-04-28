@@ -49,11 +49,16 @@ _stop_event = threading.Event()
 def _do_preprocess(manager: JobManager, job: Job) -> None:
     try:
         if job.input_type == "tiff":
+            t0 = time.time()
             n_patches = convert_tiff_to_h5(job.raw_path, job.h5_path)
+            conversion_seconds = time.time() - t0
             manager.update_status(
                 job.job_id,
                 JobStatus.CONVERTED,
-                extra={"n_patches": n_patches},
+                extra={
+                    "n_patches": n_patches,
+                    "conversion_seconds": round(conversion_seconds, 2),
+                },
             )
             manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
 
