@@ -156,11 +156,24 @@ def _read_result(job) -> dict | None:
 def _render_queue():
     """Tabla de cola que se auto-rerenderiza cada 2 s mientras haya jobs activos.
 
-    Streamlit re-ejecuta solo este fragmento; el resto de la página queda
-    quieto. No depende de componentes externos (el wrapper original
-    `streamlit-autorefresh` no carga bien tras nginx + BasicAuth).
+    Si detecta que el número de jobs DONE cambió desde la última vez,
+    dispara un rerun completo para que el resto de la página (sección
+    "Detalle por portaobjetos") también se re-renderice. Sin esto, los
+    nuevos resultados aparecen en la tabla pero no debajo.
     """
     jobs_local = manager.list_jobs()
+
+    # Detectar transiciones a DONE → rerun completo para refrescar la sección
+    # de detalle, que vive fuera del fragmento.
+    done_signature = (
+        sum(1 for j in jobs_local if j.status == JobStatus.DONE),
+        sum(1 for j in jobs_local if j.status == JobStatus.FAILED),
+    )
+    last_sig = st.session_state.get("queue_done_sig")
+    st.session_state["queue_done_sig"] = done_signature
+    if last_sig is not None and last_sig != done_signature:
+        st.rerun()
+
     if not jobs_local:
         st.info("La cola está vacía. Sube algún fichero para empezar.")
         return

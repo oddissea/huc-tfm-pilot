@@ -10,6 +10,10 @@ services:
       # Cache de pesos del modelo (~151 MB, F4 + 25 AttnMIL). Persistencia
       # entre reinicios del container para no re-descargar de GCS cada vez.
       - ./weights:/app/weights
+      # Cola de jobs (uploads + resultados). Persistencia entre redeploys
+      # para no perder predicciones al actualizar la app. M4.6 añadirá
+      # cleanup por TTL para cumplir requisitos de privacidad.
+      - ./queue:/tmp/queue
     deploy:
       resources:
         reservations:
