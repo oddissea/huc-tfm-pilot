@@ -75,6 +75,16 @@ class Job:
         """Path del H5 listo para inferencia (igual a raw_path si input_type=h5)."""
         return self.job_dir / "input.h5"
 
+    @property
+    def result_path(self) -> Path:
+        """Path del JSON con probabilidades + meta tras la inferencia."""
+        return self.job_dir / "result.json"
+
+    @property
+    def attention_path(self) -> Path:
+        """Path del .npy con pesos medios de atención (uno por parche)."""
+        return self.job_dir / "attention.npy"
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["status"] = self.status.value
@@ -187,17 +197,33 @@ class JobManager:
             return self._load_unlocked(job_id)
 
     def pop_next_pending(self) -> Job | None:
+        """Alias retrocompatible de pop_next_queued()."""
+        return self.pop_next_queued()
+
+    def pop_next_queued(self) -> Job | None:
         """Devuelve el job más antiguo en QUEUED y lo marca PROCESSING (atómico)."""
+        return self._pop_with_transition(JobStatus.QUEUED, JobStatus.PROCESSING)
+
+    def pop_next_ready_for_inference(self) -> Job | None:
+        """Devuelve el job más antiguo en READY_FOR_INFERENCE y lo marca PREDICTING."""
+        return self._pop_with_transition(
+            JobStatus.READY_FOR_INFERENCE, JobStatus.PREDICTING,
+        )
+
+    def _pop_with_transition(self, from_state: JobStatus, to_state: JobStatus) -> Job | None:
         with self._lock:
-            queued = [j for j in self._list_unlocked() if j.status == JobStatus.QUEUED]
-            if not queued:
+            candidates = [j for j in self._list_unlocked() if j.status == from_state]
+            if not candidates:
                 return None
-            queued.sort(key=lambda j: j.created_at)
-            job = queued[0]
-            job.status = JobStatus.PROCESSING
+            candidates.sort(key=lambda j: j.created_at)
+            job = candidates[0]
+            job.status = to_state
             job.updated_at = time.time()
             self._write_meta(job)
-        logger.info("Worker tomó job %s (%s)", job.short_id, job.original_filename)
+        logger.info(
+            "Worker tomó job %s (%s) %s → %s",
+            job.short_id, job.original_filename, from_state.value, to_state.value,
+        )
         return job
 
     # ------------------------------------------------------------------

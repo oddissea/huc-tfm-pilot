@@ -1,16 +1,15 @@
 """HUC TFM Pilot — Streamlit app.
 
-Estado actual (M4.3): subida múltiple de TIFF/H5, cola persistente en disco
-efímero (`/tmp/queue/`), worker secuencial que (por ahora) solo gestiona el
-paso pre-inferencia (stub TIFF→H5 + copia H5). Cargas reales y predicción
-llegan en M4.4.
-
-El smoke test sintético y el benchmark GPU se mantienen como herramientas
-de diagnóstico bajo un expander.
+Estado actual (M4.4): subida múltiple de TIFF/H5, cola persistente en disco
+efímero, worker secuencial que convierte TIFF→H5 (real) y ejecuta la
+inferencia F4 + ensemble AttnMIL ternario sobre cada portaobjetos. Las
+visualizaciones detalladas (Safety Score, overlays de atención) llegan
+en M4.5.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -20,9 +19,9 @@ import streamlit as st
 import torch
 from streamlit_autorefresh import st_autorefresh
 
-from src.inference.model import CLASS_NAMES, load_attnmil_ensemble, load_f4
+from src.inference.model import CLASS_NAMES
 from src.inference.predict import predict_synthetic
-from src.inference.weights import ensure_weights
+from src.inference.runtime import get_models, load_models, models_loaded, try_get_models
 from src.jobs import JobStatus, start_worker
 from src.jobs.manager import get_manager
 
@@ -59,7 +58,7 @@ with st.sidebar:
 
     st.divider()
     st.header("Modelo")
-    if st.session_state.get("models_loaded"):
+    if models_loaded():
         st.success("Modelos cargados ✓")
     else:
         st.caption("Pulsa para descargar pesos desde GCS y cargar el ensemble.")
@@ -71,27 +70,10 @@ with st.sidebar:
 
             t0 = time.time()
             with st.spinner("Descargando pesos y cargando modelos en GPU…"):
-                device = torch.device("cuda" if cuda_ok else "cpu")
-                paths = ensure_weights(progress_cb=_on_progress)
-                load_f4(paths["f4"], device=device)
-                load_attnmil_ensemble(paths["attnmil"], device=device)
+                load_models(progress_cb=_on_progress)
             progress.empty()
-            st.session_state["models_loaded"] = True
             st.success(f"Cargados en {time.time() - t0:.1f} s")
             st.rerun()
-
-
-# ---------------------------------------------------------------------------
-# Cache de modelos (singleton del proceso Streamlit, usado por smoke test)
-# ---------------------------------------------------------------------------
-
-@st.cache_resource(show_spinner=False)
-def get_models():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    paths = ensure_weights()
-    f4 = load_f4(paths["f4"], device=device)
-    attnmil = load_attnmil_ensemble(paths["attnmil"], device=device)
-    return f4, attnmil
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +87,15 @@ st.caption(
     "uno tras otro en la cola."
 )
 
+if not models_loaded():
+    st.warning("Los uploads se encolarán pero no se inferirán hasta que cargues los modelos (barra lateral).")
+
 uploads = st.file_uploader(
     "Arrastra uno o varios ficheros",
     type=["tif", "tiff", "h5", "hdf5"],
     accept_multiple_files=True,
 )
 
-# `uploads` persiste entre reruns: nos quedamos solo con los file_ids nuevos
-# para no encolar dos veces el mismo fichero al hacer autorefresh.
 processed_ids: set[str] = st.session_state.setdefault("processed_uploads", set())
 new_uploads = [u for u in (uploads or []) if u.file_id not in processed_ids]
 for up in new_uploads:
@@ -133,15 +116,21 @@ st.header("Cola")
 
 STATUS_LABELS = {
     JobStatus.QUEUED: "🕒 En cola",
-    JobStatus.PROCESSING: "⚙️ Procesando",
-    JobStatus.CONVERTED: "🔄 Convertido (TIFF→H5)",
+    JobStatus.PROCESSING: "⚙️ Convirtiendo",
+    JobStatus.CONVERTED: "🔄 Convertido",
     JobStatus.READY_FOR_INFERENCE: "📦 Listo para inferir",
     JobStatus.PREDICTING: "🧠 Inferiendo",
     JobStatus.DONE: "✅ Finalizado",
     JobStatus.FAILED: "❌ Falló",
 }
 
-ACTIVE_STATES = {JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.PREDICTING}
+ACTIVE_STATES = {
+    JobStatus.QUEUED,
+    JobStatus.PROCESSING,
+    JobStatus.CONVERTED,
+    JobStatus.READY_FOR_INFERENCE,
+    JobStatus.PREDICTING,
+}
 
 
 def _human_age(ts: float) -> str:
@@ -153,22 +142,54 @@ def _human_age(ts: float) -> str:
     return f"hace {int(delta // 3600)}h"
 
 
+def _read_result(job) -> dict | None:
+    if not job.result_path.exists():
+        return None
+    try:
+        with open(job.result_path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 jobs = manager.list_jobs()
 
 if not jobs:
     st.info("La cola está vacía. Sube algún fichero para empezar.")
 else:
-    has_active = any(j.status in ACTIVE_STATES for j in jobs)
+    # Auto-refresh mientras haya algo activo. Los modelos pendientes de carga
+    # también cuentan como "activo" para que el patólogo vea el estado avanzar
+    # en cuanto cargue.
+    has_active = (
+        any(j.status in ACTIVE_STATES for j in jobs)
+        or (not models_loaded() and any(j.status == JobStatus.READY_FOR_INFERENCE for j in jobs))
+    )
     if has_active:
         st_autorefresh(interval=2000, key="queue_refresh")
 
     rows = []
     for j in jobs:
+        result = _read_result(j) if j.status == JobStatus.DONE else None
+        if result is not None:
+            pred_class = result["predicted_class"]
+            conf = max(result["probabilities_mean"])
+            pred_str = f"{pred_class} · {conf:.1%}"
+            n_patches = result.get("n_patches", "")
+            elapsed = result.get("elapsed_seconds")
+            elapsed_str = f"{elapsed:.1f} s" if elapsed is not None else ""
+        else:
+            pred_str = ""
+            n_patches = j.extra.get("n_patches", "")
+            elapsed_str = ""
+
         rows.append({
             "ID": j.short_id,
             "Fichero": j.original_filename,
             "Tipo": j.input_type.upper(),
             "Estado": STATUS_LABELS.get(j.status, j.status.value),
+            "Parches": n_patches,
+            "Predicción": pred_str,
+            "Tiempo": elapsed_str,
             "Subido": datetime.fromtimestamp(j.created_at).strftime("%H:%M:%S"),
             "Actualizado": _human_age(j.updated_at),
         })
@@ -182,7 +203,7 @@ else:
                 st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
                 st.code(j.error or "(sin detalle)")
 
-    col_a, col_b = st.columns([1, 5])
+    col_a, _ = st.columns([1, 5])
     with col_a:
         if st.button("Limpiar cola"):
             for j in jobs:
@@ -201,7 +222,7 @@ with st.expander("Diagnóstico (smoke test + GPU benchmark)", expanded=False):
         "AttnMIL ensemble (25 modelos). Sin sentido clínico, solo cableado."
     )
 
-    if not st.session_state.get("models_loaded"):
+    if not models_loaded():
         st.info("Carga primero los modelos desde la barra lateral.")
     else:
         if st.button("Ejecutar smoke test"):
