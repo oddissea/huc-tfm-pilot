@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import cv2
 import h5py
 import numpy as np
 import plotly.graph_objects as go
@@ -32,6 +33,13 @@ CLASS_COLORS = {
     "ADE": "#ff7f0e",   # naranja
     "NOR": "#2ca02c",   # verde
     "CAR": "#1f77b4",   # azul
+}
+
+# Mismos colores en formato RGB (0-1) para el overlay de atención
+CLASS_COLORS_RGB = {
+    "ADE": (1.00, 0.50, 0.00),
+    "NOR": (0.18, 0.80, 0.20),
+    "CAR": (0.00, 0.40, 1.00),
 }
 
 
@@ -79,6 +87,17 @@ def _load_top_patches(job: "Job", indices: list[int]) -> list[np.ndarray]:
         ds = f["patches"]
         # patches[:, 0] es el original
         return [np.asarray(ds[i, 0]) for i in indices]
+
+
+def _load_all_originals(job: "Job") -> tuple[np.ndarray, int] | None:
+    """Lee del H5 todos los parches originales `patches[:, 0]` y devuelve
+    (array (N,H,W,3) uint8, patch_size H=W).
+    """
+    if not job.h5_path.exists():
+        return None
+    with h5py.File(str(job.h5_path), "r") as f:
+        patches = np.asarray(f["patches"][:, 0])
+    return patches, int(patches.shape[1])
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +158,61 @@ def _confidence_gauge(max_prob: float, pred_class: str) -> go.Figure:
     ))
     fig.update_layout(height=260, margin=dict(l=20, r=20, t=50, b=10))
     return fig
+
+
+def _attention_overlay(
+    positions: np.ndarray,
+    attention: np.ndarray,
+    patches_orig: np.ndarray,
+    patch_raw_size: int,
+    pred_class: str,
+    thumb_size: int = 48,
+    opacity: float = 0.85,
+) -> np.ndarray:
+    """Construye un mosaico de los parches reales con la capa de atención
+    superpuesta, coloreada según la clase predicha.
+
+    El estilo replica los overlays del TFM (sesión #45): los parches se
+    colocan en su posición de grid original y la atención se pinta como
+    una capa transparente del color de la clase (CAR=azul, ADE=naranja,
+    NOR=verde) con alpha proporcional a `attention / max(attention)`.
+
+    Devuelve uint8 RGB (n_rows*thumb_size, n_cols*thumb_size, 3).
+    """
+    pos = np.asarray(positions, dtype=np.int64)
+    n = len(pos)
+    if n == 0:
+        return np.ones((thumb_size, thumb_size, 3), dtype=np.uint8) * 255
+
+    y_min, x_min = int(pos[:, 0].min()), int(pos[:, 1].min())
+    rows = (pos[:, 0] - y_min) // patch_raw_size
+    cols = (pos[:, 1] - x_min) // patch_raw_size
+    n_rows = int(rows.max()) + 1
+    n_cols = int(cols.max()) + 1
+
+    s = thumb_size
+    canvas = np.full((n_rows * s, n_cols * s, 3), 255, dtype=np.uint8)
+    for i in range(n):
+        r, c = int(rows[i]), int(cols[i])
+        thumb = cv2.resize(patches_orig[i], (s, s), interpolation=cv2.INTER_AREA)
+        canvas[r * s:(r + 1) * s, c * s:(c + 1) * s] = thumb
+
+    color = CLASS_COLORS_RGB.get(pred_class, (0.5, 0.5, 0.5))
+    a_max = float(attention.max()) or 1.0
+    w_norm = attention / a_max
+
+    overlay_rgba = np.zeros((n_rows * s, n_cols * s, 4), dtype=np.float32)
+    color_arr = np.array(color, dtype=np.float32)
+    for i in range(n):
+        r, c = int(rows[i]), int(cols[i])
+        a = float(w_norm[i]) * opacity
+        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, :3] = color_arr
+        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, 3] = a
+
+    canvas_f = canvas.astype(np.float32) / 255.0
+    alpha = overlay_rgba[..., 3:4]
+    blended = canvas_f * (1.0 - alpha) + overlay_rgba[..., :3] * alpha
+    return (np.clip(blended, 0, 1) * 255).astype(np.uint8)
 
 
 def _attention_scatter(
@@ -250,7 +324,23 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         return
     positions, categories = h5_meta
 
-    # Top-K parches por atención
+    # Overlay tipo TFM: mosaico de los parches reales + capa coloreada
+    # según clase predicha, alpha proporcional a la atención normalizada.
+    originals = _load_all_originals(job)
+    if originals is not None:
+        patches_arr, patch_size = originals
+        if len(patches_arr) == len(attention):
+            st.markdown(
+                f"**Mapa de atención sobre el slide** "
+                f"— color de la clase predicha ({pred_class}), "
+                f"intensidad ∝ atención del AttnMIL."
+            )
+            overlay = _attention_overlay(
+                positions, attention, patches_arr, patch_size, pred_class,
+            )
+            st.image(overlay, use_container_width=True)
+
+    # Top-K parches por atención (debajo del overlay para contexto detallado)
     st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
     k = min(top_k, len(attention))
     top_idx = np.argsort(attention)[-k:][::-1].tolist()
@@ -268,8 +358,9 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                     use_container_width=True,
                 )
 
-    # Mapa scatter
-    st.plotly_chart(
-        _attention_scatter(positions, attention, categories),
-        use_container_width=True,
-    )
+    # Scatter interactivo (Plotly) en expander para inspección hover
+    with st.expander("Mapa interactivo de atención (hover para detalle)"):
+        st.plotly_chart(
+            _attention_scatter(positions, attention, categories),
+            use_container_width=True,
+        )
