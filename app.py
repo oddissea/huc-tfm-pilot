@@ -23,6 +23,7 @@ from src.inference.predict import predict_synthetic
 from src.inference.runtime import get_models, load_models, models_loaded, try_get_models
 from src.jobs import JobStatus, start_worker
 from src.jobs.manager import get_manager
+from src.viz import render_slide_detail
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -211,6 +212,24 @@ if jobs:
             for j in jobs:
                 manager.delete(j.job_id)
             st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Detalle de portaobjetos
+# ---------------------------------------------------------------------------
+
+done_jobs = [j for j in jobs if j.status == JobStatus.DONE] if jobs else []
+if done_jobs:
+    st.divider()
+    st.header("Detalle por portaobjetos")
+    options = {f"{j.short_id} · {j.original_filename}": j for j in done_jobs}
+    sel = st.selectbox(
+        "Selecciona un portaobjetos finalizado",
+        options=list(options.keys()),
+        index=0,
+    )
+    if sel:
+        render_slide_detail(options[sel])
 
 
 # ---------------------------------------------------------------------------
