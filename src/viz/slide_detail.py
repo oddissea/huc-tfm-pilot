@@ -13,6 +13,8 @@ deja el worker en `/tmp/queue/<uuid>/`.
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 from typing import TYPE_CHECKING
 
@@ -21,6 +23,7 @@ import h5py
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+from PIL import Image
 
 if TYPE_CHECKING:
     from src.jobs.manager import Job
@@ -87,6 +90,21 @@ def _load_top_patches(job: "Job", indices: list[int]) -> list[np.ndarray]:
         ds = f["patches"]
         # patches[:, 0] es el original
         return [np.asarray(ds[i, 0]) for i in indices]
+
+
+def _patch_to_data_uri(patch_np: np.ndarray) -> str:
+    """Convierte un parche (H,W,3) uint8 en un data-URI PNG base64.
+
+    Necesario para esquivar el media manager de Streamlit, que construye
+    URLs relativas al servidor y falla con 'not connected to a server!'
+    detrás de nginx + WebSocket en algunas combinaciones de cliente/proxy.
+    Embebido directamente en <img>, no necesita servidor.
+    """
+    img = Image.fromarray(patch_np)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 
 def _load_all_originals(job: "Job") -> tuple[np.ndarray, int] | None:
@@ -426,10 +444,14 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             with cols[i]:
                 cat = categories[idx] if idx < len(categories) else "?"
                 cat_label = f" · {cat}" if cat not in ("?", "XXX") else ""
-                st.image(
-                    patch,
-                    caption=f"#{idx} · α={attention[idx]:.4f}{cat_label}",
-                    use_container_width=True,
+                uri = _patch_to_data_uri(patch)
+                st.markdown(
+                    f'<img src="{uri}" style="width:100%;border-radius:4px;'
+                    f'border:1px solid #e0e0e0;">'
+                    f'<div style="text-align:center;font-size:0.85rem;'
+                    f'color:#555;margin-top:4px;">'
+                    f'#{idx} · α={attention[idx]:.4f}{cat_label}</div>',
+                    unsafe_allow_html=True,
                 )
 
     # Scatter interactivo (Plotly) en expander para inspección hover
