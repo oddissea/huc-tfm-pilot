@@ -25,7 +25,10 @@ import threading
 import time
 import traceback
 
+import numpy as np
+
 from src.inference.h5_loader import load_patches_from_h5
+from src.inference.model import CLASS_NAMES
 from src.inference.predict import predict_slide
 from src.inference.runtime import try_get_models
 from src.preprocessing import convert_tiff_to_h5
@@ -35,6 +38,13 @@ from .manager import Job, JobManager, JobStatus, get_manager
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 1.0
+
+# Mapeo de etiquetas patch-level del H5 a clases ternarias (ADE/NOR/CAR).
+# TUM se renombró a CAR en la memoria del TFM (sesión #36); el código
+# interno y los H5 conservan "TUM". HIP (hiperplasia) y ART (artefacto)
+# no forman parte de la tarea ternaria → se excluyen del cómputo.
+RAW_TO_TERNARY = {"NOR": "NOR", "ADE": "ADE", "TUM": "CAR"}
+EXCLUDED_RAW = {"HIP", "ART", "XXX", "?"}
 
 
 _worker_thread: threading.Thread | None = None
@@ -113,13 +123,48 @@ def _do_inference(manager: JobManager, job: Job) -> None:
             "elapsed_seconds": elapsed,
             "source_image_name": h5.source_image_name,
             "patch_raw_size": h5.raw_size,
+            "has_patch_gt": h5.has_patch_gt,
         }
-        with open(job.result_path, "w") as f:
-            json.dump(result_dict, f, indent=2)
 
         if result.attention_weights_mean is not None:
-            import numpy as np
             np.save(job.attention_path, result.attention_weights_mean.numpy())
+
+        # GT + predicciones patch-level: solo si el H5 trae etiquetas útiles
+        # (no todo XXX). Mapeamos TUM→CAR y excluimos HIP/ART del cómputo.
+        if h5.has_patch_gt and result.patch_predictions is not None:
+            cats_raw = h5.patch_categories                        # (N,) str
+            cats_ternary = np.array([
+                RAW_TO_TERNARY.get(c, "EXCLUDED") for c in cats_raw
+            ])
+            valid_mask = cats_ternary != "EXCLUDED"
+            class_to_idx = {c: i for i, c in enumerate(CLASS_NAMES)}
+            gt_idx_full = np.array([
+                class_to_idx[c] if c in class_to_idx else -1 for c in cats_ternary
+            ], dtype=np.int64)
+
+            np.savez(
+                job.patch_eval_path,
+                cats_raw=cats_raw,
+                cats_ternary=cats_ternary,
+                valid_mask=valid_mask,
+                gt_index=gt_idx_full,
+                pred_index=result.patch_predictions.numpy().astype(np.int64),
+                pred_probs=result.patch_probs.numpy().astype(np.float32),
+            )
+            n_valid = int(valid_mask.sum())
+            n_excluded = int((~valid_mask).sum())
+            result_dict["patch_eval"] = {
+                "n_valid": n_valid,
+                "n_excluded": n_excluded,
+                "excluded_breakdown": {
+                    c: int((cats_raw == c).sum())
+                    for c in EXCLUDED_RAW
+                    if (cats_raw == c).any()
+                },
+            }
+
+        with open(job.result_path, "w") as f:
+            json.dump(result_dict, f, indent=2)
 
         manager.update_status(
             job.job_id,

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import cv2
 import h5py
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
@@ -61,6 +62,14 @@ def _load_attention(job: "Job") -> np.ndarray | None:
     if not job.attention_path.exists():
         return None
     return np.load(job.attention_path)
+
+
+def _load_patch_eval(job: "Job") -> dict | None:
+    """Carga el `.npz` con GT + preds patch-level (solo si existe)."""
+    if not job.patch_eval_path.exists():
+        return None
+    npz = np.load(job.patch_eval_path)
+    return {k: npz[k] for k in npz.files}
 
 
 def _load_h5_meta(job: "Job") -> tuple[np.ndarray, np.ndarray] | None:
@@ -361,6 +370,237 @@ def _attention_overlay_figure(
 
 
 # ---------------------------------------------------------------------------
+# Validación patch-level (matriz de confusión + métricas)
+# ---------------------------------------------------------------------------
+
+def _confusion_matrix(gt: np.ndarray, pred: np.ndarray, k: int = 3) -> np.ndarray:
+    """Matriz de confusión kxk con filas=real, columnas=predicho."""
+    cm = np.zeros((k, k), dtype=np.int64)
+    for g, p in zip(gt, pred):
+        cm[int(g), int(p)] += 1
+    return cm
+
+
+def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float]]:
+    """Precision / recall / F1 por clase a partir de la matriz de confusión."""
+    out: dict[str, dict[str, float]] = {}
+    for i, name in enumerate(CLASS_NAMES):
+        tp = int(cm[i, i])
+        fn = int(cm[i, :].sum() - tp)
+        fp = int(cm[:, i].sum() - tp)
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        support = int(cm[i, :].sum())
+        out[name] = {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "support": support,
+        }
+    return out
+
+
+def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
+    """Heatmap 3x3 de la matriz de confusión normalizada por fila (recall)."""
+    row_sums = cm.sum(axis=1, keepdims=True)
+    cm_norm = np.where(row_sums > 0, cm / np.maximum(row_sums, 1), 0.0)
+
+    text = [
+        [
+            f"<b>{cm[i, j]}</b><br>{cm_norm[i, j]:.1%}"
+            for j in range(cm.shape[1])
+        ]
+        for i in range(cm.shape[0])
+    ]
+
+    fig = go.Figure(go.Heatmap(
+        z=cm_norm,
+        x=list(CLASS_NAMES),
+        y=list(CLASS_NAMES),
+        colorscale="Blues",
+        zmin=0, zmax=1,
+        text=text,
+        texttemplate="%{text}",
+        hovertemplate="real=%{y} · predicho=%{x}<br>%{text}<extra></extra>",
+        showscale=True,
+        colorbar=dict(title="recall<br>por fila", thickness=12, len=0.7, tickformat=".0%"),
+    ))
+    fig.update_layout(
+        title="Matriz de confusión a nivel de parche (filas: real, columnas: predicho)",
+        xaxis=dict(title="Predicho", side="bottom"),
+        yaxis=dict(title="Real", autorange="reversed"),
+        height=380,
+        margin=dict(l=10, r=10, t=60, b=20),
+    )
+    return fig
+
+
+def _render_patch_validation(patch_eval: dict, result: dict) -> None:
+    """Sección 'Validación a nivel de parche' bajo el detalle del slide.
+
+    Solo se llama si el H5 trae etiquetas patch-level útiles. Replica las
+    cifras del TFM (acc, F1 macro, CAR→NOR, CAR→ADE) sobre los parches de
+    este único portaobjetos.
+    """
+    valid_mask = patch_eval["valid_mask"]
+    if not valid_mask.any():
+        st.info("El H5 trae etiquetas, pero ninguna corresponde a la tarea ternaria (todas HIP/ART/XXX).")
+        return
+
+    gt = patch_eval["gt_index"][valid_mask]
+    pred = patch_eval["pred_index"][valid_mask]
+    n_valid = int(valid_mask.sum())
+    n_excluded = int((~valid_mask).sum())
+
+    cm = _confusion_matrix(gt, pred)
+    accuracy = (gt == pred).mean() if n_valid else 0.0
+    metrics = _per_class_metrics(cm)
+    f1_macro = float(np.mean([m["f1"] for m in metrics.values()]))
+
+    # Tasas críticas (estilo Safety Score del TFM): CAR→NOR y CAR→ADE
+    car_idx = CLASS_NAMES.index("CAR")
+    nor_idx = CLASS_NAMES.index("NOR")
+    ade_idx = CLASS_NAMES.index("ADE")
+    car_total = int(cm[car_idx, :].sum())
+    car_to_nor = int(cm[car_idx, nor_idx])
+    car_to_ade = int(cm[car_idx, ade_idx])
+    car_to_nor_rate = car_to_nor / car_total if car_total else 0.0
+    car_to_ade_rate = car_to_ade / car_total if car_total else 0.0
+
+    st.divider()
+    st.subheader("Validación a nivel de parche")
+    st.caption(
+        f"Comparación de la predicción del clasificador F4 con la etiqueta "
+        f"del H5 sobre **{n_valid} parches** ternarios. "
+        + (f"Excluidos {n_excluded} parches HIP/ART/XXX. " if n_excluded else "")
+        + "Las cifras replican el estilo de las tablas §5 del TFM."
+    )
+
+    cols = st.columns(4)
+    cols[0].metric("Accuracy patch-level", f"{accuracy:.1%}")
+    cols[1].metric("F1 macro", f"{f1_macro:.3f}")
+    cols[2].metric("CAR→NOR", f"{car_to_nor_rate:.1%} ({car_to_nor}/{car_total})" if car_total else "—")
+    cols[3].metric("CAR→ADE", f"{car_to_ade_rate:.1%} ({car_to_ade}/{car_total})" if car_total else "—")
+
+    col_cm, col_table = st.columns([3, 2])
+    with col_cm:
+        st.plotly_chart(_confusion_heatmap(cm), use_container_width=True)
+    with col_table:
+        st.markdown("**Métricas por clase**")
+        rows = []
+        for name, m in metrics.items():
+            rows.append({
+                "Clase": name,
+                "Precisión": f"{m['precision']:.1%}",
+                "Sensibilidad": f"{m['recall']:.1%}",
+                "F1": f"{m['f1']:.3f}",
+                "Soporte": m["support"],
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        breakdown = result.get("patch_eval", {}).get("excluded_breakdown", {})
+        if breakdown:
+            counts = ", ".join(f"{k}={v}" for k, v in breakdown.items())
+            st.caption(f"Parches excluidos por categoría: {counts}")
+
+
+# ---------------------------------------------------------------------------
+# Métricas acumuladas slide-level (M4.7b)
+# ---------------------------------------------------------------------------
+
+def render_session_metrics(jobs: list) -> None:
+    """Sección 'Métricas acumuladas': agrega todos los DONE con GT slide-level
+    y construye matriz de confusión 3x3 + métricas per-class.
+
+    La GT se introduce al subir (radio en `app.py`) y se persiste en
+    `job.extra['slide_gt']`. Solo se cuentan los jobs con GT y predicción
+    válida en {ADE, NOR, CAR}.
+    """
+    pairs: list[tuple[int, int, str]] = []  # (gt_idx, pred_idx, filename)
+    for j in jobs:
+        gt = j.extra.get("slide_gt")
+        if gt not in CLASS_NAMES:
+            continue
+        result = _load_result(j)
+        if result is None:
+            continue
+        pred = result.get("predicted_class")
+        if pred not in CLASS_NAMES:
+            continue
+        pairs.append((CLASS_NAMES.index(gt), CLASS_NAMES.index(pred), j.original_filename))
+
+    if not pairs:
+        return  # Sin GT, no se muestra nada
+
+    gt_arr = np.array([p[0] for p in pairs])
+    pred_arr = np.array([p[1] for p in pairs])
+    cm = _confusion_matrix(gt_arr, pred_arr)
+    accuracy = (gt_arr == pred_arr).mean()
+    metrics = _per_class_metrics(cm)
+    f1_macro = float(np.mean([m["f1"] for m in metrics.values()]))
+
+    car_idx = CLASS_NAMES.index("CAR")
+    nor_idx = CLASS_NAMES.index("NOR")
+    ade_idx = CLASS_NAMES.index("ADE")
+    car_total = int(cm[car_idx, :].sum())
+    car_to_nor = int(cm[car_idx, nor_idx])
+    car_to_ade = int(cm[car_idx, ade_idx])
+    car_to_nor_rate = car_to_nor / car_total if car_total else 0.0
+    car_to_ade_rate = car_to_ade / car_total if car_total else 0.0
+
+    st.divider()
+    st.subheader("Métricas acumuladas (slide-level)")
+    st.caption(
+        f"Agregado de **{len(pairs)} portaobjetos** con etiqueta GT introducida al subir. "
+        "Cada portaobjetos cuenta una vez. Útil para validar el modelo sobre un "
+        "lote etiquetado por ti (p. ej. los 91 del cohort §5.9)."
+    )
+
+    cols = st.columns(4)
+    cols[0].metric("Slides evaluados", f"{len(pairs)}")
+    cols[1].metric("Accuracy", f"{accuracy:.1%}")
+    cols[2].metric("F1 macro", f"{f1_macro:.3f}")
+    cols[3].metric(
+        "CAR→NOR",
+        f"{car_to_nor_rate:.1%} ({car_to_nor}/{car_total})" if car_total else "—",
+    )
+
+    col_cm, col_table = st.columns([3, 2])
+    with col_cm:
+        st.plotly_chart(_confusion_heatmap(cm), use_container_width=True)
+    with col_table:
+        st.markdown("**Métricas por clase**")
+        rows = []
+        for name, m in metrics.items():
+            rows.append({
+                "Clase": name,
+                "Precisión": f"{m['precision']:.1%}",
+                "Sensibilidad": f"{m['recall']:.1%}",
+                "F1": f"{m['f1']:.3f}",
+                "Soporte": m["support"],
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        if car_total:
+            st.caption(
+                f"CAR→ADE: {car_to_ade_rate:.1%} ({car_to_ade}/{car_total}) · "
+                f"CAR→NOR: {car_to_nor_rate:.1%} ({car_to_nor}/{car_total})"
+            )
+
+    with st.expander("Detalle por portaobjetos"):
+        detail_rows = [
+            {
+                "Fichero": fname,
+                "GT": CLASS_NAMES[g],
+                "Predicción": CLASS_NAMES[p],
+                "Acierto": "✓" if g == p else "✗",
+            }
+            for g, p, fname in pairs
+        ]
+        st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
 # Función pública
 # ---------------------------------------------------------------------------
 
@@ -460,3 +700,9 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             _attention_scatter(positions, attention, categories),
             use_container_width=True,
         )
+
+    # Validación patch-level (matriz confusión + métricas) si el H5 trae GT
+    if result.get("has_patch_gt"):
+        patch_eval = _load_patch_eval(job)
+        if patch_eval is not None:
+            _render_patch_validation(patch_eval, result)

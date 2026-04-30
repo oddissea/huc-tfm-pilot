@@ -35,6 +35,8 @@ class SlideResult:
     n_patches: int                     # número de parches del portaobjetos
     n_models_used: int                 # 1, 5 o 25
     attention_weights_mean: torch.Tensor | None  # (N,) atención promedio si se pidió
+    patch_probs: torch.Tensor | None = None       # (N, 3) softmax del classifier F4 por parche
+    patch_predictions: torch.Tensor | None = None # (N,) argmax de patch_probs (idx 0..2)
 
 
 def _f4_forward_to_features(
@@ -42,8 +44,8 @@ def _f4_forward_to_features(
     patches_orig: torch.Tensor,
     patches_reb: torch.Tensor,
     batch_size: int = 64,
-) -> torch.Tensor:
-    """Pasa los parches por F4 hasta el feature map post-ReLU del clasificador.
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pasa los parches por F4 y devuelve features 512-d + logits ternarios por parche.
 
     Args:
         f4: bundle del F4 cargado
@@ -52,13 +54,16 @@ def _f4_forward_to_features(
         batch_size: tamaño de batch para inferencia
 
     Returns:
-        tensor (N, 512) — features post-ReLU del classifier (input del AttnMIL)
+        - features 512-d (N, 512) post-ReLU del classifier (input del AttnMIL)
+        - logits ternarios (N, 3) del classifier F4 (para predicción patch-level)
     """
     device = f4.device
     n = patches_orig.shape[0]
-    out_chunks: list[torch.Tensor] = []
+    feat_chunks: list[torch.Tensor] = []
+    logit_chunks: list[torch.Tensor] = []
 
-    classifier_hidden = f4.classifier.hidden  # nn.Linear(4096, 512)
+    classifier_hidden = f4.classifier.hidden     # nn.Linear(4096, 512)
+    classifier_output = f4.classifier.output     # nn.Linear(512, 3)
 
     with torch.inference_mode():
         for start in range(0, n, batch_size):
@@ -69,9 +74,11 @@ def _f4_forward_to_features(
             embeddings_4096 = f4.encoder((x_orig, x_reb))   # (B, 4096)
             hidden_pre_relu = classifier_hidden(embeddings_4096)  # (B, 512)
             hidden_post_relu = F.relu(hidden_pre_relu)            # input del AttnMIL
-            out_chunks.append(hidden_post_relu.cpu())
+            patch_logits = classifier_output(hidden_post_relu)    # (B, 3)
+            feat_chunks.append(hidden_post_relu.cpu())
+            logit_chunks.append(patch_logits.cpu())
 
-    return torch.cat(out_chunks, dim=0)
+    return torch.cat(feat_chunks, dim=0), torch.cat(logit_chunks, dim=0)
 
 
 def _select_attnmil_models(
@@ -124,7 +131,9 @@ def predict_slide(
             f"No hay modelos AttnMIL para modo={mode} (seed={seed}, fold={fold})"
         )
 
-    features_512 = _f4_forward_to_features(f4, patches_orig, patches_reb)
+    features_512, patch_logits = _f4_forward_to_features(f4, patches_orig, patches_reb)
+    patch_probs = F.softmax(patch_logits, dim=-1)            # (N, 3)
+    patch_preds = torch.argmax(patch_probs, dim=-1)          # (N,)
     features_512 = features_512.to(f4.device)
 
     probs_per_member: list[torch.Tensor] = []
@@ -156,6 +165,8 @@ def predict_slide(
         n_patches=int(features_512.shape[0]),
         n_models_used=len(selected),
         attention_weights_mean=attention_mean,
+        patch_probs=patch_probs,
+        patch_predictions=patch_preds,
     )
 
 

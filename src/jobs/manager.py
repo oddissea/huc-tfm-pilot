@@ -85,6 +85,11 @@ class Job:
         """Path del .npy con pesos medios de atención (uno por parche)."""
         return self.job_dir / "attention.npy"
 
+    @property
+    def patch_eval_path(self) -> Path:
+        """Path del .npz con GT + predicciones por parche (solo si hay GT)."""
+        return self.job_dir / "patch_eval.npz"
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["status"] = self.status.value
@@ -113,7 +118,12 @@ class JobManager:
     # Escritura
     # ------------------------------------------------------------------
 
-    def enqueue(self, file_obj: IO[bytes], original_filename: str) -> Job:
+    def enqueue(
+        self,
+        file_obj: IO[bytes],
+        original_filename: str,
+        slide_gt: str | None = None,
+    ) -> Job:
         ext = Path(original_filename).suffix.lower()
         if ext in TIFF_EXTS:
             input_type = "tiff"
@@ -125,6 +135,9 @@ class JobManager:
             )
 
         now = time.time()
+        extra: dict = {}
+        if slide_gt is not None:
+            extra["slide_gt"] = slide_gt
         job = Job(
             job_id=str(uuid.uuid4()),
             original_filename=original_filename,
@@ -132,6 +145,7 @@ class JobManager:
             status=JobStatus.QUEUED,
             created_at=now,
             updated_at=now,
+            extra=extra,
         )
 
         with self._lock:

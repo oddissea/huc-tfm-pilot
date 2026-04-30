@@ -23,7 +23,7 @@ from src.inference.predict import predict_synthetic
 from src.inference.runtime import get_models, load_models, models_loaded, try_get_models
 from src.jobs import JobStatus, start_worker
 from src.jobs.manager import get_manager
-from src.viz import render_slide_detail
+from src.viz import render_session_metrics, render_slide_detail
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -90,6 +90,17 @@ st.caption(
 if not models_loaded():
     st.warning("Los uploads se encolarán pero no se inferirán hasta que cargues los modelos (barra lateral).")
 
+GT_OPTIONS = ("Sin etiqueta", "NOR", "ADE", "CAR")
+gt_choice = st.radio(
+    "Etiqueta GT a nivel de portaobjetos (se aplica a todos los ficheros de esta subida)",
+    options=GT_OPTIONS,
+    index=0,
+    horizontal=True,
+    help="Opcional. Si la indicas, se acumula en la sección 'Métricas acumuladas' "
+         "para construir matriz de confusión slide-level conforme proceses más portaobjetos.",
+)
+slide_gt = None if gt_choice == "Sin etiqueta" else gt_choice
+
 uploads = st.file_uploader(
     "Arrastra uno o varios ficheros",
     type=["tif", "tiff", "h5", "hdf5"],
@@ -100,12 +111,13 @@ processed_ids: set[str] = st.session_state.setdefault("processed_uploads", set()
 new_uploads = [u for u in (uploads or []) if u.file_id not in processed_ids]
 for up in new_uploads:
     try:
-        manager.enqueue(up, up.name)
+        manager.enqueue(up, up.name, slide_gt=slide_gt)
         processed_ids.add(up.file_id)
     except Exception as e:
         st.error(f"No se pudo encolar `{up.name}`: {e}")
 if new_uploads:
-    st.success(f"Encolados {len(new_uploads)} fichero(s).")
+    gt_msg = f" con GT={slide_gt}" if slide_gt else ""
+    st.success(f"Encolados {len(new_uploads)} fichero(s){gt_msg}.")
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +215,7 @@ def _render_queue():
             "ID": j.short_id,
             "Fichero": j.original_filename,
             "Tipo": j.input_type.upper(),
+            "GT": j.extra.get("slide_gt", "—"),
             "Estado": STATUS_LABELS.get(j.status, j.status.value),
             "Parches": n_patches,
             "Predicción": pred_str,
@@ -239,6 +252,8 @@ if jobs:
 
 done_jobs = [j for j in jobs if j.status == JobStatus.DONE] if jobs else []
 if done_jobs:
+    render_session_metrics(done_jobs)
+
     st.divider()
     st.header("Detalle por portaobjetos")
     options = {f"{j.short_id} · {j.original_filename}": j for j in done_jobs}

@@ -37,6 +37,12 @@ class H5Patches:
     positions: np.ndarray        # (N, 2) int — (y, x)
     source_image_name: str | None
     raw_size: int                # H=W del parche en el H5 (antes del resize)
+    patch_categories: np.ndarray # (N,) str — etiqueta por parche ('XXX' = sin GT)
+
+    @property
+    def has_patch_gt(self) -> bool:
+        """True si el H5 trae etiquetas patch-level útiles (no todo XXX/?)."""
+        return bool(((self.patch_categories != "XXX") & (self.patch_categories != "?")).any())
 
 
 def _patches_to_tensor(patches_np: np.ndarray) -> torch.Tensor:
@@ -87,6 +93,14 @@ def load_patches_from_h5(h5_path: Path) -> H5Patches:
             if "patch_positions" in f else np.zeros((n, 2), dtype=np.int32)
         )
 
+        if "patch_categories" in f:
+            cats_raw = f["patch_categories"][:]   # type: ignore[index]
+            categories = np.array([
+                c.decode() if isinstance(c, bytes) else str(c) for c in cats_raw
+            ])
+        else:
+            categories = np.array(["?"] * n)
+
         source_name = None
         attrs = dict(f.attrs)   # type: ignore[arg-type]
         if "source_image_name" in attrs:
@@ -107,4 +121,5 @@ def load_patches_from_h5(h5_path: Path) -> H5Patches:
         positions=np.asarray(positions),
         source_image_name=source_name,
         raw_size=h,
+        patch_categories=categories,
     )
