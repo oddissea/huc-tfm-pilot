@@ -435,8 +435,13 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
     ))
     fig.update_layout(
         title="Matriz de confusión a nivel de parche (filas: real, columnas: predicho)",
-        xaxis=dict(title="Predicho", side="bottom"),
-        yaxis=dict(title="Real", autorange="reversed"),
+        xaxis=dict(title="Predicho", side="bottom", constrain="domain"),
+        yaxis=dict(
+            title="Real",
+            autorange="reversed",
+            scaleanchor="x",
+            scaleratio=1,
+        ),
         height=380,
         margin=dict(l=10, r=10, t=60, b=20),
     )
