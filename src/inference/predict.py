@@ -7,7 +7,7 @@ Uso típico:
     # patches: arrays uint8 (N, H, W, 3) — la conversión + resize se hace
     # por batch en GPU para no agotar RAM en slides grandes (ca_1534 = 3.177).
     out = predict_slide(bundle, attnmil_ensemble, patches_orig, patches_reb,
-                        mode="ensemble_25")
+                        mode="ensemble")
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ TARGET_HW = 224
 logger = logging.getLogger(__name__)
 
 
-InferenceMode = Literal["single", "single_seed", "ensemble_25"]
+InferenceMode = Literal["single", "ensemble"]
 
 
 @dataclass
@@ -119,18 +119,13 @@ def _select_attnmil_models(
     ensemble: list[AttnMILBundle],
     mode: InferenceMode,
     seed: int | None = None,
-    fold: int | None = None,
 ) -> list[AttnMILBundle]:
     """Filtra el ensemble según el modo de inferencia."""
     if mode == "single":
-        if seed is None or fold is None:
-            raise ValueError("modo 'single' requiere seed y fold")
-        return [b for b in ensemble if b.seed == seed and b.fold == fold]
-    if mode == "single_seed":
         if seed is None:
-            raise ValueError("modo 'single_seed' requiere seed")
+            raise ValueError("modo 'single' requiere seed")
         return [b for b in ensemble if b.seed == seed]
-    if mode == "ensemble_25":
+    if mode == "ensemble":
         return list(ensemble)
     raise ValueError(f"modo desconocido: {mode}")
 
@@ -140,29 +135,28 @@ def predict_slide(
     ensemble: list[AttnMILBundle],
     patches_orig: np.ndarray,
     patches_reb: np.ndarray,
-    mode: InferenceMode = "ensemble_25",
+    mode: InferenceMode = "ensemble",
     seed: int | None = None,
-    fold: int | None = None,
     return_attention: bool = False,
 ) -> SlideResult:
     """Inferencia completa: parches → F4 → features 512-d → AttnMIL → probabilidades.
 
     Args:
         f4: bundle del modelo F4 cargado
-        ensemble: lista de AttnMILBundle (puede tener 1, 5 o 25 elementos en este caso)
+        ensemble: lista de AttnMILBundle (5 modelos del ensemble de producción)
         patches_orig: np.ndarray (N, H, W, 3) uint8 — sin convertir
         patches_reb:  np.ndarray (N, H, W, 3) uint8 — sin convertir
-        mode: "single" | "single_seed" | "ensemble_25"
-        seed, fold: requeridos para los modos no-ensemble
+        mode: "single" | "ensemble"
+        seed: requerido en modo "single"
         return_attention: si True, devuelve además los pesos medios de atención
 
     Returns:
         SlideResult con probabilidades + meta
     """
-    selected = _select_attnmil_models(ensemble, mode, seed=seed, fold=fold)
+    selected = _select_attnmil_models(ensemble, mode, seed=seed)
     if not selected:
         raise ValueError(
-            f"No hay modelos AttnMIL para modo={mode} (seed={seed}, fold={fold})"
+            f"No hay modelos AttnMIL para modo={mode} (seed={seed})"
         )
 
     features_512, patch_logits = _f4_forward_to_features(f4, patches_orig, patches_reb)
@@ -208,7 +202,7 @@ def predict_synthetic(
     f4: F4Bundle,
     ensemble: list[AttnMILBundle],
     n_patches: int = 50,
-    mode: InferenceMode = "ensemble_25",
+    mode: InferenceMode = "ensemble",
 ) -> SlideResult:
     """Smoke test: genera parches uint8 aleatorios y predice.
 

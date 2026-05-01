@@ -351,7 +351,7 @@ with st.expander("Diagnóstico (smoke test + GPU benchmark)", expanded=False):
             f4, ensemble = get_models()
             with st.spinner("Generando parches y prediciendo…"):
                 t0 = time.time()
-                result = predict_synthetic(f4, ensemble, n_patches=50, mode="ensemble_25")
+                result = predict_synthetic(f4, ensemble, n_patches=50, mode="ensemble")
                 dt = time.time() - t0
 
             st.success(f"OK — {dt * 1000:.0f} ms (50 parches × 25 modelos)")

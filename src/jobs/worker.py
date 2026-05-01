@@ -108,7 +108,7 @@ def _do_inference(manager: JobManager, job: Job) -> None:
             f4, ensemble,
             patches_orig=h5.patches_orig,
             patches_reb=h5.patches_reb,
-            mode="ensemble_25",
+            mode="ensemble",
             return_attention=True,
         )
         elapsed = time.time() - t0

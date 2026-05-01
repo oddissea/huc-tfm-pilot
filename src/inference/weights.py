@@ -2,8 +2,14 @@
 
 Estructura esperada en `gs://huc-tfm-pilot-models/`:
 
-    F4/final_inference_model.pth                     -- pesos del modelo F4 patch-level
-    attnmil/seed_{42,123,456,789,2026}/fold_{0..4}.pth   -- 25 modelos del ensemble ternario
+    F4/final_inference_model.pth                          -- pesos del modelo F4 patch-level
+    attnmil_production/seed_{42,123,456,789,2026}/model.pth   -- 5 modelos del ensemble ternario
+
+Cada `seed_N/model.pth` es un AttnMIL ternario 512-d entrenado sobre los 91
+slides clínicos del cohort §5.9 **sin** validación cruzada (artefacto de
+producción). §5.9 reporta el rendimiento esperado sobre slides nuevos
+(92,8 ± 1,1 % accuracy en 5-fold CV multi-seed); este ensemble de 5 ofrece
+robustez por reducción de varianza al consumir el modelo en producción.
 
 Se descargan al directorio local `/app/weights/` (montado como volumen Docker
 para que persista entre reinicios). En la siguiente arrancada, si los ficheros
@@ -15,7 +21,6 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Iterable
 
 from google.cloud import storage
 
@@ -26,7 +31,7 @@ WEIGHTS_DIR = Path(os.environ.get("HUC_PILOT_WEIGHTS_DIR", "/app/weights"))
 
 F4_BLOB = "F4/final_inference_model.pth"
 ATTNMIL_SEEDS = (42, 123, 456, 789, 2026)
-ATTNMIL_FOLDS = (0, 1, 2, 3, 4)
+ATTNMIL_PREFIX = "attnmil_production"
 
 
 def f4_local_path() -> Path:
@@ -34,14 +39,14 @@ def f4_local_path() -> Path:
     return WEIGHTS_DIR / F4_BLOB
 
 
-def attnmil_local_path(seed: int, fold: int) -> Path:
+def attnmil_local_path(seed: int) -> Path:
     """Ruta local donde se cachea un modelo concreto del ensemble AttnMIL."""
-    return WEIGHTS_DIR / "attnmil" / f"seed_{seed}" / f"fold_{fold}.pth"
+    return WEIGHTS_DIR / ATTNMIL_PREFIX / f"seed_{seed}" / "model.pth"
 
 
-def list_attnmil_models() -> list[tuple[int, int]]:
-    """Devuelve la lista canónica de (seed, fold) que conforma el ensemble."""
-    return [(s, f) for s in ATTNMIL_SEEDS for f in ATTNMIL_FOLDS]
+def list_attnmil_seeds() -> list[int]:
+    """Devuelve la lista canónica de seeds que conforma el ensemble de producción."""
+    return list(ATTNMIL_SEEDS)
 
 
 def _download_blob(client: storage.Client, blob_name: str, target: Path) -> None:
@@ -57,7 +62,7 @@ def _download_blob(client: storage.Client, blob_name: str, target: Path) -> None
 
 
 def ensure_weights(progress_cb=None) -> dict:
-    """Garantiza que F4 y los 25 AttnMIL están descargados localmente.
+    """Garantiza que F4 y los 5 AttnMIL están descargados localmente.
 
     Args:
         progress_cb: opcional, función `progress_cb(done: int, total: int, msg: str)`
@@ -67,13 +72,13 @@ def ensure_weights(progress_cb=None) -> dict:
         Diccionario con las rutas locales:
             {
                 "f4": Path,
-                "attnmil": [(seed, fold, Path), ...],
+                "attnmil": [(seed, Path), ...],
             }
     """
     client = storage.Client()
 
-    pairs = list_attnmil_models()
-    total = 1 + len(pairs)
+    seeds = list_attnmil_seeds()
+    total = 1 + len(seeds)
     done = 0
 
     if progress_cb is not None:
@@ -81,13 +86,13 @@ def ensure_weights(progress_cb=None) -> dict:
     _download_blob(client, F4_BLOB, f4_local_path())
     done += 1
 
-    attnmil_paths: list[tuple[int, int, Path]] = []
-    for seed, fold in pairs:
+    attnmil_paths: list[tuple[int, Path]] = []
+    for seed in seeds:
         if progress_cb is not None:
-            progress_cb(done, total, f"Descargando AttnMIL seed={seed} fold={fold}…")
-        path = attnmil_local_path(seed, fold)
-        _download_blob(client, f"attnmil/seed_{seed}/fold_{fold}.pth", path)
-        attnmil_paths.append((seed, fold, path))
+            progress_cb(done, total, f"Descargando AttnMIL seed={seed}…")
+        path = attnmil_local_path(seed)
+        _download_blob(client, f"{ATTNMIL_PREFIX}/seed_{seed}/model.pth", path)
+        attnmil_paths.append((seed, path))
         done += 1
 
     if progress_cb is not None:

@@ -7,9 +7,11 @@ Los hiperparámetros están extraídos directamente de los checkpoints:
       num_classes=3, embedding_dim=4096, hidden_units=512,
       dropout=0.1, freeze_encoder=True
 
-  AttnMIL ternary 512-d (forma de los tensores en seed_*/fold_*.pth):
+  AttnMIL ternary 512-d producción (seed_*/model.pth):
       embedding_dim=512, hidden_dim=256, num_classes=3,
-      dropout=0.25, attention_heads=1
+      dropout=0.25, attention_heads=1.
+      5 modelos (1 por seed) entrenados sobre los 91 slides clínicos
+      sin CV. La estimación de generalización proviene de §5.9.
 """
 
 from __future__ import annotations
@@ -42,9 +44,8 @@ class F4Bundle:
 
 @dataclass
 class AttnMILBundle:
-    """Un modelo AttnMIL del ensemble ternario, identificado por (seed, fold)."""
+    """Un modelo AttnMIL del ensemble ternario de producción, identificado por seed."""
     seed: int
-    fold: int
     model: nn.Module
 
 
@@ -87,12 +88,12 @@ def load_f4(checkpoint_path: Path, device: torch.device) -> F4Bundle:
 
 
 def load_attnmil_ensemble(
-    checkpoints: Iterable[tuple[int, int, Path]],
+    checkpoints: Iterable[tuple[int, Path]],
     device: torch.device,
 ) -> list[AttnMILBundle]:
-    """Carga los 25 (o los que sean) modelos AttnMIL del ensemble ternario."""
+    """Carga los modelos AttnMIL del ensemble ternario de producción."""
     bundles: list[AttnMILBundle] = []
-    for seed, fold, path in checkpoints:
+    for seed, path in checkpoints:
         model = AttentionMIL(
             embedding_dim=512,
             hidden_dim=256,
@@ -105,7 +106,7 @@ def load_attnmil_ensemble(
         model = model.to(device).eval()
         for p in model.parameters():
             p.requires_grad_(False)
-        bundles.append(AttnMILBundle(seed=seed, fold=fold, model=model))
-        logger.debug("loaded AttnMIL seed=%d fold=%d", seed, fold)
+        bundles.append(AttnMILBundle(seed=seed, model=model))
+        logger.debug("loaded AttnMIL seed=%d", seed)
     logger.info("loaded %d AttnMIL models", len(bundles))
     return bundles
