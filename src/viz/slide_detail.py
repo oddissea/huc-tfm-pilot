@@ -525,13 +525,15 @@ def _render_openseadragon_viewer(
           svg.style.pointerEvents = "none";
 
           const rect = document.createElementNS(SVG_NS, "rect");
-          rect.setAttribute("x", "0.04");
-          rect.setAttribute("y", "0.04");
-          rect.setAttribute("width", "0.92");
-          rect.setAttribute("height", "0.92");
+          // Inset mínimo (1.5 % cada lado) para que el borde quede casi
+          // pegado al parche pero sin que strokes adyacentes se toquen.
+          rect.setAttribute("x", "0.015");
+          rect.setAttribute("y", "0.015");
+          rect.setAttribute("width", "0.97");
+          rect.setAttribute("height", "0.97");
           rect.setAttribute("fill", "none");
           rect.setAttribute("stroke", o.color);
-          rect.setAttribute("stroke-width", "0.035");
+          rect.setAttribute("stroke-width", "0.025");
           svg.appendChild(rect);
 
           const div = document.createElement("div");
@@ -785,68 +787,14 @@ def _render_patch_predictions(
 
     if (positions is not None and patches_arr is not None
             and patch_size is not None and len(patches_arr) == len(pred_index)):
-        st.markdown(
-            "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
-            "azul CAR. Borde coloreado por la clase predicha del clasificador "
-            "F4 sobre cada parche; el tejido queda visible para zoom."
-        )
-        thumb_options = {"48 px": 48, "64 px": 64, "96 px": 96, "128 px": 128}
-        thumb_label = st.radio(
-            "Resolución del mapa de predicciones",
-            options=list(thumb_options.keys()),
-            index=0,
-            horizontal=True,
-            key=f"thumb_size_pred_{job_id}" if job_id else "thumb_size_pred",
-            help=(
-                "Tamaño de cada parche en el mosaico. Resolución alta = más "
-                "detalle al hacer zoom, pero más tiempo de render en slides "
-                "con muchos parches."
-            ),
-        )
-        thumb_size = thumb_options[thumb_label]
+        # El mapa de predicciones por parche ya lo cubre el visor
+        # OpenSeadragon de arriba (overlay SVG con bordes coloreados sobre
+        # el WSI stitched). Aquí solo dejamos el inspector de parche
+        # individual (selectbox + nav + tarjeta con la imagen 300x300).
         n = len(pred_index)
         sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
         if sel_key not in st.session_state:
             st.session_state[sel_key] = -1
-
-        with st.spinner(
-            f"Generando mapa de predicciones ({len(pred_index)} parches a {thumb_size} px)…"
-        ):
-            fig_pred = _patch_predictions_overlay_figure_cached(
-                job_id=job_id or "no_id",
-                thumb_size=thumb_size,
-                border_thickness=3,
-                _pred_index=pred_index,
-                _patches_arr=patches_arr,
-                _positions=positions,
-                _attention=attention,
-                patch_raw_size=patch_size,
-            )
-            # `on_select="rerun"` + selection_mode=("points",) hace que un
-            # click sobre un parche del mosaico devuelva un evento con
-            # customdata[0] = índice del parche → se inyecta en el selector
-            # de abajo automáticamente.
-            event = st.plotly_chart(
-                fig_pred,
-                use_container_width=True,
-                config={"displayModeBar": True, "scrollZoom": True},
-                on_select="rerun",
-                selection_mode=("points",),
-                key=f"plot_pred_{job_id}",
-            )
-
-        # Capturar click sobre parche del mosaico → seleccionar en el panel
-        try:
-            sel_points = event["selection"]["points"]
-        except (KeyError, TypeError, AttributeError):
-            sel_points = []
-        if sel_points:
-            pt = sel_points[-1]   # último click
-            cd = pt.get("customdata") if isinstance(pt, dict) else None
-            if cd and len(cd) > 0:
-                clicked_idx = int(cd[0])
-                if clicked_idx != st.session_state.get(sel_key, -1):
-                    st.session_state[sel_key] = clicked_idx
 
         @st.fragment
         def _render_inspector():
@@ -855,8 +803,9 @@ def _render_patch_predictions(
             (El click sobre un parche del mosaico Plotly sí dispara un
             rerun completo de la página por limitación de Streamlit.)"""
             st.markdown(
-                "**Inspeccionar parche en detalle** — *click en un parche del "
-                "mosaico para inspeccionarlo, o usa los controles abajo*"
+                "**Inspeccionar parche en detalle** — *navega con ←/→ o "
+                "elige el índice; verás el parche a tamaño nativo (300×300) "
+                "junto a su predicción y atención.*"
             )
 
             def _nav_idx(delta: int, key: str, n_max: int) -> None:
