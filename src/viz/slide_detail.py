@@ -1171,6 +1171,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     show_pred = mode == OPT_PRED
 
     # ─── Visor OpenSeadragon con la capa correspondiente ────────────────────
+    dzi_status = job.extra.get("dzi_status", "unknown")
     if job.dzi_path.exists() and pred_index is not None:
         osd_offset = (
             int(job.extra.get("dzi_y_min", 0)),
@@ -1192,10 +1193,31 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "parche para ver `#índice · clase · atención`. Las áreas blancas "
             "son zonas que el filtro de tejido descartó al parchear."
         )
+    elif dzi_status == "generating":
+        # El thread async de DZI todavía está corriendo. La cola fragment
+        # rerunna cada 2 s y dispara rerun global cuando has_dzi cambia,
+        # así que el visor aparecerá automáticamente al terminar.
+        st.info(
+            "⏳ **Generando visor multi-resolución…** El visor "
+            "(OpenSeadragon) tarda en construirse según el tamaño del "
+            "portaobjetos: ~5 s para slides pequeños, hasta 1-3 minutos "
+            "para WSIs grandes. Aparece automáticamente aquí en cuanto "
+            "esté listo. Las predicciones y métricas ya están disponibles "
+            "más abajo."
+        )
+        st.progress(0, text="Construyendo pirámide de tiles…")
+    elif dzi_status == "failed":
+        err = job.extra.get("dzi_error", "(sin detalle)")
+        st.error(
+            f"❌ **Visor multi-resolución no disponible.** La generación "
+            f"de tiles falló: `{err}`. Las predicciones y métricas siguen "
+            "funcionando con normalidad más abajo."
+        )
     else:
         st.info(
             "El visor multi-resolución no está disponible para este job "
-            "(falta DZI). Las métricas y mapas se muestran de todos modos."
+            "(legado: subido antes de la integración OpenSeadragon). Las "
+            "métricas y mapas se muestran de todos modos."
         )
 
     # ─── Vista 'Atención': top-K + métricas slide-level + barras + aviso ────

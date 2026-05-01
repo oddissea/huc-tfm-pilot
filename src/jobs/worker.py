@@ -59,9 +59,8 @@ _stop_event = threading.Event()
 def _generate_dzi_async(manager: JobManager, job: Job) -> None:
     """Genera el DZI en un thread paralelo a la inferencia. La inferencia
     usa GPU + lectura de embeddings; pyvips usa CPU + RAM → no compiten
-    por recursos. El meta.json se actualiza con extra['has_dzi']=True
-    en cuanto termina; el frontend lo detecta vía el fragment de la cola
-    (que añade has_dzi al signature de cambios)."""
+    por recursos. El meta.json se actualiza con `dzi_status` en cada
+    transición (generating/done/failed) para que la UI lo refleje."""
     try:
         from src.preprocessing.dzi import generate_dzi_from_h5
         t = time.time()
@@ -71,6 +70,7 @@ def _generate_dzi_async(manager: JobManager, job: Job) -> None:
         elapsed = round(time.time() - t, 2)
         manager.update_extra(
             job.job_id,
+            dzi_status="done",
             has_dzi=True,
             dzi_seconds=elapsed,
             dzi_y_min=int(y_min),
@@ -81,6 +81,7 @@ def _generate_dzi_async(manager: JobManager, job: Job) -> None:
             job.short_id, elapsed, y_min, x_min,
         )
     except Exception as dzi_e:
+        manager.update_extra(job.job_id, dzi_status="failed", dzi_error=str(dzi_e))
         logger.warning(
             "Job %s: DZI gen async falló (%s) — el resto del flujo no se ve afectado",
             job.short_id, dzi_e,
@@ -101,6 +102,9 @@ def _do_preprocess(manager: JobManager, job: Job) -> None:
         else:
             raise ValueError(f"Tipo de input desconocido: {job.input_type}")
 
+        # Marcar que vamos a empezar a generar el DZI (la UI muestra
+        # spinner) ANTES de pasar a READY_FOR_INFERENCE.
+        extra["dzi_status"] = "generating"
         manager.update_status(job.job_id, JobStatus.CONVERTED, extra=extra)
         manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
 

@@ -224,15 +224,13 @@ def _render_queue():
     """
     jobs_local = manager.list_jobs()
 
-    # Detectar transiciones a DONE → rerun completo para refrescar la sección
-    # de detalle, que vive fuera del fragmento. También incluimos has_dzi
-    # en la signature para que cuando el thread async de generación de DZI
-    # termine (mientras el patólogo mira un detalle), el visor aparezca
-    # automáticamente sin tener que hacer F5.
+    # Detectar transiciones a DONE / DZI → rerun completo para refrescar
+    # la sección de detalle (vive fuera del fragmento) y la columna 'Visor'
+    # de la tabla. dzi_status pasa por 'generating' → 'done' o 'failed'.
     done_signature = (
         sum(1 for j in jobs_local if j.status == JobStatus.DONE),
         sum(1 for j in jobs_local if j.status == JobStatus.FAILED),
-        sum(1 for j in jobs_local if j.extra.get("has_dzi") is True),
+        tuple(j.extra.get("dzi_status", "x") for j in jobs_local),
     )
     last_sig = st.session_state.get("queue_done_sig")
     st.session_state["queue_done_sig"] = done_signature
@@ -264,12 +262,21 @@ def _render_queue():
             n_patches = j.extra.get("n_patches", "")
             elapsed_str = ""
 
+        # Estado del visor OpenSeadragon (DZI generado async tras el H5)
+        dzi_status = j.extra.get("dzi_status", "unknown")
+        dzi_emoji = {
+            "generating": "⏳",
+            "done": "✅",
+            "failed": "❌",
+        }.get(dzi_status, "—")
+
         rows.append({
             "ID": j.short_id,
             "Fichero": j.original_filename,
             "Tipo": j.input_type.upper(),
             "GT": j.extra.get("slide_gt", "—"),
             "Estado": STATUS_LABELS.get(j.status, j.status.value),
+            "Visor": dzi_emoji,
             "Parches": str(n_patches) if n_patches != "" else "",
             "Predicción": pred_str,
             "Tiempo": elapsed_str,
