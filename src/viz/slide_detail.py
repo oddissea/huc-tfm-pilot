@@ -652,6 +652,11 @@ def _render_patch_predictions(
             ),
         )
         thumb_size = thumb_options[thumb_label]
+        n = len(pred_index)
+        sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
+        if sel_key not in st.session_state:
+            st.session_state[sel_key] = -1
+
         with st.spinner(
             f"Generando mapa de predicciones ({len(pred_index)} parches a {thumb_size} px)…"
         ):
@@ -660,42 +665,58 @@ def _render_patch_predictions(
                 attention=attention,
                 thumb_size=thumb_size,
             )
-            st.plotly_chart(
+            # `on_select="rerun"` + selection_mode=("points",) hace que un
+            # click sobre un parche del mosaico devuelva un evento con
+            # customdata[0] = índice del parche → se inyecta en el selector
+            # de abajo automáticamente.
+            event = st.plotly_chart(
                 fig_pred,
                 use_container_width=True,
                 config={"displayModeBar": True, "scrollZoom": True},
+                on_select="rerun",
+                selection_mode=("points",),
+                key=f"plot_pred_{job_id}",
             )
 
-        # Inspección de parche en detalle: el mosaico arriba sigue intacto;
-        # aquí simplemente añadimos un panel para ver UN parche a tamaño
-        # nativo (300×300) con su metadata, navegando con ← /→. Sin tocar
-        # Plotly, sin event capture: pure Streamlit.
-        n = len(pred_index)
-        sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
-        if sel_key not in st.session_state:
-            st.session_state[sel_key] = -1
+        # Capturar click sobre parche del mosaico → seleccionar en el panel
+        try:
+            sel_points = event["selection"]["points"]
+        except (KeyError, TypeError, AttributeError):
+            sel_points = []
+        if sel_points:
+            pt = sel_points[-1]   # último click
+            cd = pt.get("customdata") if isinstance(pt, dict) else None
+            if cd and len(cd) > 0:
+                clicked_idx = int(cd[0])
+                if clicked_idx != st.session_state.get(sel_key, -1):
+                    st.session_state[sel_key] = clicked_idx
 
-        st.markdown("**Inspeccionar parche en detalle**")
+        st.markdown(
+            "**Inspeccionar parche en detalle** — *click en un parche del "
+            "mosaico para inspeccionarlo, o usa los controles abajo*"
+        )
         ctrl_cols = st.columns([1, 6, 1])
         with ctrl_cols[0]:
-            if st.button("←", key=f"prev_{sel_key}", disabled=(st.session_state[sel_key] <= 0)):
+            if st.button("←", key=f"prev_{sel_key}",
+                         disabled=(st.session_state[sel_key] <= 0)):
                 st.session_state[sel_key] -= 1
                 st.rerun()
         with ctrl_cols[1]:
+            # El selectbox usa la MISMA key que el state principal (sel_key)
+            # para que se mantenga sincronizado con clicks del mosaico y los
+            # botones de navegación. Streamlit lee/escribe st.session_state[sel_key]
+            # automáticamente vía la key.
             options = [-1] + list(range(n))
-            sel = st.selectbox(
+            st.selectbox(
                 "Índice del parche (—  = ocultar)",
                 options=options,
-                index=options.index(st.session_state[sel_key]),
                 format_func=lambda i: "—" if i == -1 else f"#{i}",
-                key=f"sel_{sel_key}",
+                key=sel_key,
                 label_visibility="collapsed",
             )
-            if sel != st.session_state[sel_key]:
-                st.session_state[sel_key] = sel
-                st.rerun()
         with ctrl_cols[2]:
-            if st.button("→", key=f"next_{sel_key}", disabled=(st.session_state[sel_key] >= n - 1)):
+            if st.button("→", key=f"next_{sel_key}",
+                         disabled=(st.session_state[sel_key] >= n - 1)):
                 st.session_state[sel_key] = max(0, st.session_state[sel_key] + 1)
                 st.rerun()
 
