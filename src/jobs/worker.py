@@ -8,7 +8,7 @@ Dos transiciones que el worker realiza:
 
 2. **Inferencia** (estado terminal: DONE)
    - Carga input.h5 (parches 300×300 → resize 224×224)
-   - F4 → features 512-d → AttnMIL ensemble (25 modelos)
+   - F4 → features 512-d → AttnMIL ensemble (5 modelos)
    - Guarda result.json + attention.npy
 
 Si los modelos no están cargados todavía, los jobs se quedan en

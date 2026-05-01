@@ -341,7 +341,7 @@ with st.expander("Diagnóstico (smoke test + GPU benchmark)", expanded=False):
     st.subheader("Smoke test sintético")
     st.caption(
         "Verificación end-to-end: 50 parches aleatorios → F4 → features 512-d → "
-        "AttnMIL ensemble (25 modelos). Sin sentido clínico, solo cableado."
+        "AttnMIL ensemble (5 modelos). Sin sentido clínico, solo cableado."
     )
 
     if not models_loaded():
@@ -354,7 +354,7 @@ with st.expander("Diagnóstico (smoke test + GPU benchmark)", expanded=False):
                 result = predict_synthetic(f4, ensemble, n_patches=50, mode="ensemble")
                 dt = time.time() - t0
 
-            st.success(f"OK — {dt * 1000:.0f} ms (50 parches × 25 modelos)")
+            st.success(f"OK — {dt * 1000:.0f} ms (50 parches × 5 modelos)")
 
             col1, col2 = st.columns(2)
             with col1:

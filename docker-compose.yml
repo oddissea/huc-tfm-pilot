@@ -7,7 +7,7 @@ services:
       - "8501"
     restart: unless-stopped
     volumes:
-      # Cache de pesos del modelo (~151 MB, F4 + 25 AttnMIL). Persistencia
+      # Cache de pesos del modelo (~151 MB, F4 + 5 AttnMIL). Persistencia
       # entre reinicios del container para no re-descargar de GCS cada vez.
       - ./weights:/app/weights
       # Cola de jobs (uploads + resultados). Persistencia entre redeploys

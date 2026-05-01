@@ -153,7 +153,7 @@ def _probability_bars(probs: list[float], stds: list[float], pred_class: str) ->
         customdata=stds,
     ))
     fig.update_layout(
-        title="Probabilidades por clase (media ± std del ensemble de 25 modelos)",
+        title="Probabilidades por clase (media ± std del ensemble de 5 modelos)",
         xaxis=dict(range=[0, 1], tickformat=".0%", title=""),
         yaxis=dict(title=""),
         height=260,
@@ -491,14 +491,14 @@ def _patch_predictions_overlay(
     pred_index: np.ndarray,
     patches_orig: np.ndarray,
     patch_raw_size: int,
-    attention: np.ndarray | None = None,
     thumb_size: int = 48,
-    base_opacity: float = 0.65,
+    border_thickness: int = 3,
 ) -> np.ndarray:
-    """Mosaico de los parches reales con capa coloreada por la clase predicha
-    de cada parche (verde=NOR, naranja=ADE, azul=CAR). Si se pasa `attention`,
-    la opacidad se modula por atención (el AttnMIL pesa más unos parches que
-    otros). Devuelve uint8 RGB.
+    """Mosaico de los parches reales con un **borde coloreado** por la clase
+    predicha de cada parche (verde=NOR, naranja=ADE, azul=CAR). El tejido
+    queda visible al 100 %, sin opacity blending, para que el patólogo pueda
+    hacer zoom y comprobar el contenido de cada parche. Intensidad uniforme:
+    no se modula por atención (esa info está en el otro mapa).
     """
     pos = np.asarray(positions, dtype=np.int64)
     n = len(pos)
@@ -517,25 +517,16 @@ def _patch_predictions_overlay(
         r, c = int(rows[i]), int(cols[i])
         thumb = cv2.resize(patches_orig[i], (s, s), interpolation=cv2.INTER_AREA)
         canvas[r * s:(r + 1) * s, c * s:(c + 1) * s] = thumb
-
-    if attention is not None and attention.size:
-        a_max = float(attention.max()) or 1.0
-        alpha_per_patch = (attention / a_max) * base_opacity
-    else:
-        alpha_per_patch = np.full(n, base_opacity, dtype=np.float32)
-
-    overlay_rgba = np.zeros((n_rows * s, n_cols * s, 4), dtype=np.float32)
-    for i in range(n):
         cls = CLASS_NAMES[int(pred_index[i])]
-        color = np.array(CLASS_COLORS_RGB[cls], dtype=np.float32)
-        r, c = int(rows[i]), int(cols[i])
-        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, :3] = color
-        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, 3] = float(alpha_per_patch[i])
-
-    canvas_f = canvas.astype(np.float32) / 255.0
-    alpha = overlay_rgba[..., 3:4]
-    blended = canvas_f * (1.0 - alpha) + overlay_rgba[..., :3] * alpha
-    return (np.clip(blended, 0, 1) * 255).astype(np.uint8)
+        color_rgb = tuple(int(v * 255) for v in CLASS_COLORS_RGB[cls])
+        cv2.rectangle(
+            canvas,
+            (c * s, r * s),
+            ((c + 1) * s - 1, (r + 1) * s - 1),
+            color_rgb,
+            thickness=border_thickness,
+        )
+    return canvas
 
 
 def _patch_predictions_overlay_figure(
@@ -845,14 +836,25 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     # ─── Aviso clínico sobre la interpretación de la confianza ──────────────
     st.info(
         "**La confianza no es una probabilidad de acierto.** Es la media del "
-        "*softmax* del ensemble (25 modelos AttnMIL) en la clase predicha. "
-        "Un valor alto indica que los modelos del ensemble coinciden con "
-        "*softmax* saturado, **no** que la predicción sea correcta esa "
-        "proporción de veces. El *softmax* no está calibrado: interprétalo "
-        "como **seguridad relativa del modelo**, no como certeza diagnóstica. "
+        "*softmax* del ensemble de 5 modelos *AttnMIL* en la clase predicha. "
+        "Un valor alto indica que los 5 modelos coinciden con *softmax* "
+        "saturado, **no** que la predicción sea correcta esa proporción de "
+        "veces. El *softmax* no está calibrado: interprétalo como "
+        "**seguridad relativa del modelo**, no como certeza diagnóstica.\n\n"
+        "**TFM vs producción.** La memoria del TFM (§5.9) reporta "
+        "**92,8 ± 1,1 %** *accuracy* mediante validación cruzada 5-fold "
+        "*multi-seed* sobre los 91 portaobjetos clínicos del HUC: esa es la "
+        "estimación honest del rendimiento esperado sobre portaobjetos "
+        "**nuevos**. El *ensemble* desplegado en esta app es un "
+        "reentrenamiento posterior de **5** modelos sobre los 91 completos "
+        "**sin holdout** (práctica estándar al pasar de evaluación a "
+        "producción) — sobre portaobjetos del propio cohort §5.9 las "
+        "predicciones serán muy seguras (todos los modelos los vieron en "
+        "*training*), pero esa cifra **no es comparable** con §5.9. "
+        "**Para portaobjetos nuevos esperar ~92,8 % accuracy.**\n\n"
         "Las barras de error de la sección siguiente miden la dispersión "
-        "entre los 25 modelos del ensemble: una *std* alta indica desacuerdo "
-        "entre miembros."
+        "entre los 5 modelos del *ensemble*: una *std* alta indica "
+        "desacuerdo entre miembros."
     )
 
     # ─── Probabilidades + gauge ─────────────────────────────────────────────
