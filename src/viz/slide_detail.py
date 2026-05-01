@@ -402,13 +402,20 @@ def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float]]:
 
 
 def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
-    """Heatmap 3x3 de la matriz de confusión normalizada por fila (recall)."""
-    row_sums = cm.sum(axis=1, keepdims=True)
-    cm_norm = np.where(row_sums > 0, cm / np.maximum(row_sums, 1), 0.0)
+    """Heatmap 3x3 de la matriz de confusión.
+
+    El degradado y el % entre paréntesis están normalizados **por columna**
+    (perspectiva "predicción"): cada columna suma 100 % y el color se satura
+    donde una predicción de clase X realmente corresponde a la clase X. Es
+    complementario a la tabla per-class de la derecha, que ofrece la vista
+    por fila (recall + precisión + F1).
+    """
+    col_sums = cm.sum(axis=0, keepdims=True)
+    cm_norm = np.where(col_sums > 0, cm / np.maximum(col_sums, 1), 0.0)
 
     text = [
         [
-            f"<b>{cm[i, j]}</b><br>{cm_norm[i, j]:.1%}"
+            f"<b>{cm[i, j]}</b><br>({cm_norm[i, j]:.1%})"
             for j in range(cm.shape[1])
         ]
         for i in range(cm.shape[0])
@@ -424,7 +431,7 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
         texttemplate="%{text}",
         hovertemplate="real=%{y} · predicho=%{x}<br>%{text}<extra></extra>",
         showscale=True,
-        colorbar=dict(title="recall<br>por fila", thickness=12, len=0.7, tickformat=".0%"),
+        colorbar=dict(title="% por<br>columna", thickness=12, len=0.7, tickformat=".0%"),
     ))
     fig.update_layout(
         title="Matriz de confusión a nivel de parche (filas: real, columnas: predicho)",
