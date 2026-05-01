@@ -19,9 +19,7 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from src.inference.model import CLASS_NAMES
-from src.inference.predict import predict_synthetic
-from src.inference.runtime import get_models, load_models, models_loaded, try_get_models
+from src.inference.runtime import load_models, models_loaded
 from src.jobs import JobStatus, start_worker
 from src.jobs.manager import get_manager
 from src.viz import render_session_metrics, render_slide_detail
@@ -405,52 +403,3 @@ if done_jobs:
         render_slide_detail(options[sel])
 
 
-# ---------------------------------------------------------------------------
-# Diagnóstico (smoke test sintético + GPU benchmark) — colapsado
-# ---------------------------------------------------------------------------
-
-with st.expander("Diagnóstico (smoke test + GPU benchmark)", expanded=False):
-    st.subheader("Smoke test sintético")
-    st.caption(
-        "Verificación end-to-end: 50 parches aleatorios → F4 → features 512-d → "
-        "AttnMIL ensemble (5 modelos). Sin sentido clínico, solo cableado."
-    )
-
-    if not models_loaded():
-        st.info("Carga primero los modelos desde la barra lateral.")
-    else:
-        if st.button("Ejecutar smoke test"):
-            f4, ensemble = get_models()
-            with st.spinner("Generando parches y prediciendo…"):
-                t0 = time.time()
-                result = predict_synthetic(f4, ensemble, n_patches=50, mode="ensemble")
-                dt = time.time() - t0
-
-            st.success(f"OK — {dt * 1000:.0f} ms (50 parches × 5 modelos)")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Probabilidades (media del ensemble)**")
-                for i, name in enumerate(CLASS_NAMES):
-                    st.metric(
-                        label=name,
-                        value=f"{result.probabilities_mean[i].item():.3f}",
-                        delta=f"± {result.probabilities_std[i].item():.3f}",
-                    )
-            with col2:
-                st.markdown("**Meta**")
-                st.write(f"Predicted class: `{result.predicted_class}`")
-                st.write(f"N parches: `{result.n_patches}`")
-                st.write(f"N modelos: `{result.n_models_used}`")
-
-    st.divider()
-    st.subheader("GPU benchmark (matmul 4096×4096)")
-    if cuda_ok and st.button("Ejecutar matmul"):
-        x = torch.randn(4096, 4096, device="cuda")
-        y = torch.randn(4096, 4096, device="cuda")
-        torch.cuda.synchronize()
-        t0 = time.time()
-        z = x @ y
-        torch.cuda.synchronize()
-        dt = time.time() - t0
-        st.success(f"OK — {dt * 1000:.1f} ms. Norma: `{z.norm().item():.3e}`")
