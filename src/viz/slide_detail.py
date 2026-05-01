@@ -766,13 +766,15 @@ def _render_patch_predictions(
     patches_arr: np.ndarray | None = None,
     patch_size: int | None = None,
     attention: np.ndarray | None = None,
-    job_id: str | None = None,
+    job: "Job | None" = None,
 ) -> None:
     """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
-    + overlay del slide coloreado por predicción de cada parche."""
+    + visor OpenSeadragon con overlay de bordes coloreados (si hay DZI) +
+    inspector individual con la imagen del parche a tamaño nativo."""
     pred_index = np.asarray(patch_eval.get("pred_index"), dtype=np.int64)
     if pred_index.size == 0:
         return
+    job_id = job.job_id if job is not None else None
     st.divider()
     st.subheader("Predicciones a nivel de parche")
     st.caption(
@@ -785,12 +787,32 @@ def _render_patch_predictions(
     )
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
 
+    # Mapa de predicciones por parche (visor OpenSeadragon con overlays SVG)
+    if job is not None and job.dzi_path.exists():
+        st.markdown(
+            "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
+            "azul CAR. Borde coloreado por la clase predicha del clasificador "
+            "F4 sobre cada parche; el tejido queda visible para zoom."
+        )
+        osd_offset = (
+            int(job.extra.get("dzi_y_min", 0)),
+            int(job.extra.get("dzi_x_min", 0)),
+        )
+        _render_openseadragon_viewer(
+            job,
+            positions=positions,
+            pred_index=pred_index,
+            patch_raw_size=patch_size,
+            dzi_offset=osd_offset,
+        )
+        st.caption(
+            "Visor con tiles multi-resolución (OpenSeadragon). Pan con "
+            "arrastrar, zoom con rueda. Las áreas blancas son zonas que el "
+            "filtro de tejido descartó al parchear el portaobjetos."
+        )
+
     if (positions is not None and patches_arr is not None
             and patch_size is not None and len(patches_arr) == len(pred_index)):
-        # El mapa de predicciones por parche ya lo cubre el visor
-        # OpenSeadragon de arriba (overlay SVG con bordes coloreados sobre
-        # el WSI stitched). Aquí solo dejamos el inspector de parche
-        # individual (selectbox + nav + tarjeta con la imagen 300x300).
         n = len(pred_index)
         sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
         if sel_key not in st.session_state:
@@ -1128,40 +1150,6 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             use_container_width=True,
         )
 
-    # ─── Visor WSI profesional (OpenSeadragon) si hay DZI ───────────────────
-    # Solo se genera DZI cuando se sube un TIFF original (los H5 ya parcheados
-    # no tienen WSI completo). Si existe, lo mostramos antes de los mosaicos
-    # de atención/predicciones para que sea la primera vista del patólogo.
-    # Cargamos posiciones y predicciones por parche para dibujar overlays
-    # coloreados sobre el WSI directamente (verde NOR / naranja ADE / azul CAR).
-    _patch_eval_for_osd = _load_patch_eval(job)
-    _h5_meta_for_osd = _load_h5_meta(job)
-    osd_positions = _h5_meta_for_osd[0] if _h5_meta_for_osd is not None else None
-    osd_pred_index = (
-        np.asarray(_patch_eval_for_osd["pred_index"], dtype=np.int64)
-        if _patch_eval_for_osd is not None and "pred_index" in _patch_eval_for_osd
-        else None
-    )
-    osd_patch_size = result.get("patch_raw_size")
-    osd_offset = (
-        int(job.extra.get("dzi_y_min", 0)),
-        int(job.extra.get("dzi_x_min", 0)),
-    )
-    if _render_openseadragon_viewer(
-        job,
-        positions=osd_positions,
-        pred_index=osd_pred_index,
-        patch_raw_size=osd_patch_size,
-        dzi_offset=osd_offset,
-    ):
-        st.caption(
-            "Visor profesional con tiles multi-resolución (OpenSeadragon). "
-            "Pan con arrastrar, zoom con rueda. Cada parche se dibuja con un "
-            "borde del color de la clase predicha (verde NOR / naranja ADE / "
-            "azul CAR). Los mosaicos coloreados de atención y predicciones "
-            "siguen disponibles más abajo."
-        )
-
     # ─── Atención: requiere attention.npy + positions del H5 ────────────────
     attention = _load_attention(job)
     if attention is None:
@@ -1272,7 +1260,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 patches_arr=originals_data[0] if originals_data[0] is not None else None,
                 patch_size=originals_data[1] if originals_data[1] is not None else None,
                 attention=attention,
-                job_id=job.job_id,
+                job=job,
             )
             if result.get("has_patch_gt"):
                 _render_patch_validation(patch_eval, result)
