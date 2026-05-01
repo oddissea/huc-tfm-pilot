@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
@@ -116,15 +117,22 @@ def _patch_to_data_uri(patch_np: np.ndarray) -> str:
     return f"data:image/png;base64,{b64}"
 
 
-def _load_all_originals(job: "Job") -> tuple[np.ndarray, int] | None:
-    """Lee del H5 todos los parches originales `patches[:, 0]` y devuelve
-    (array (N,H,W,3) uint8, patch_size H=W).
-    """
-    if not job.h5_path.exists():
+@st.cache_data(show_spinner=False, max_entries=8)
+def _load_all_originals_cached(job_id: str, h5_path_str: str) -> tuple[np.ndarray, int] | None:
+    """Versión cacheada por job_id (clicks subsiguientes leen de RAM)."""
+    h5_path = Path(h5_path_str)
+    if not h5_path.exists():
         return None
-    with h5py.File(str(job.h5_path), "r") as f:
+    with h5py.File(str(h5_path), "r") as f:
         patches = np.asarray(f["patches"][:, 0])
     return patches, int(patches.shape[1])
+
+
+def _load_all_originals(job: "Job") -> tuple[np.ndarray, int] | None:
+    """Lee del H5 todos los parches originales `patches[:, 0]` y devuelve
+    (array (N,H,W,3) uint8, patch_size H=W). Cacheado entre reruns.
+    """
+    return _load_all_originals_cached(job.job_id, str(job.h5_path))
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +315,30 @@ def _attention_scatter(
         margin=dict(l=10, r=10, t=50, b=20),
     )
     return fig
+
+
+@st.cache_data(show_spinner=False, max_entries=8, hash_funcs={"_thread.RLock": lambda _: None})
+def _attention_overlay_figure_cached(
+    job_id: str, thumb_size: int, opacity: float,
+    pred_class: str, _patches_arr: np.ndarray, _positions: np.ndarray,
+    _attention: np.ndarray, patch_raw_size: int,
+) -> go.Figure:
+    return _attention_overlay_figure(
+        _positions, _attention, _patches_arr, patch_raw_size, pred_class,
+        thumb_size=thumb_size, opacity=opacity,
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=8, hash_funcs={"_thread.RLock": lambda _: None})
+def _patch_predictions_overlay_figure_cached(
+    job_id: str, thumb_size: int, border_thickness: int,
+    _pred_index: np.ndarray, _patches_arr: np.ndarray, _positions: np.ndarray,
+    _attention: np.ndarray | None, patch_raw_size: int,
+) -> go.Figure:
+    return _patch_predictions_overlay_figure(
+        _positions, _pred_index, _patches_arr, patch_raw_size,
+        attention=_attention, thumb_size=thumb_size, border_thickness=border_thickness,
+    )
 
 
 def _attention_overlay_figure(
@@ -660,10 +692,15 @@ def _render_patch_predictions(
         with st.spinner(
             f"Generando mapa de predicciones ({len(pred_index)} parches a {thumb_size} px)…"
         ):
-            fig_pred = _patch_predictions_overlay_figure(
-                positions, pred_index, patches_arr, patch_size,
-                attention=attention,
+            fig_pred = _patch_predictions_overlay_figure_cached(
+                job_id=job_id or "no_id",
                 thumb_size=thumb_size,
+                border_thickness=3,
+                _pred_index=pred_index,
+                _patches_arr=patches_arr,
+                _positions=positions,
+                _attention=attention,
+                patch_raw_size=patch_size,
             )
             # `on_select="rerun"` + selection_mode=("points",) hace que un
             # click sobre un parche del mosaico devuelva un evento con
@@ -1062,9 +1099,15 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         f"Generando overlay de atención ({n_patches} parches a {thumb_size_att} px)…"
     ):
         if patches_arr is not None and len(patches_arr) == len(attention):
-            fig_overlay = _attention_overlay_figure(
-                positions, attention, patches_arr, patch_size, pred_class,
+            fig_overlay = _attention_overlay_figure_cached(
+                job_id=job.job_id,
                 thumb_size=thumb_size_att,
+                opacity=0.85,
+                pred_class=pred_class,
+                _patches_arr=patches_arr,
+                _positions=positions,
+                _attention=attention,
+                patch_raw_size=patch_size,
             )
         else:
             fig_overlay = None
