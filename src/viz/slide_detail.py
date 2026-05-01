@@ -381,9 +381,9 @@ def _confusion_matrix(gt: np.ndarray, pred: np.ndarray, k: int = 3) -> np.ndarra
     return cm
 
 
-def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float]]:
+def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float | int]]:
     """Precision / recall / F1 por clase a partir de la matriz de confusión."""
-    out: dict[str, dict[str, float]] = {}
+    out: dict[str, dict[str, float | int]] = {}
     for i, name in enumerate(CLASS_NAMES):
         tp = int(cm[i, i])
         fn = int(cm[i, :].sum() - tp)
@@ -397,6 +397,7 @@ def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float]]:
             "recall": recall,
             "f1": f1,
             "support": support,
+            "tp": tp,
         }
     return out
 
@@ -500,7 +501,7 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
             rows.append({
                 "Clase": name,
                 "Precisión": f"{m['precision']:.1%}",
-                "Sensibilidad": f"{m['recall']:.1%}",
+                "Sensibilidad": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
                 "F1": f"{m['f1']:.3f}",
                 "Soporte": m["support"],
             })
@@ -583,7 +584,7 @@ def render_session_metrics(jobs: list) -> None:
             rows.append({
                 "Clase": name,
                 "Precisión": f"{m['precision']:.1%}",
-                "Sensibilidad": f"{m['recall']:.1%}",
+                "Sensibilidad": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
                 "F1": f"{m['f1']:.3f}",
                 "Soporte": m["support"],
             })
