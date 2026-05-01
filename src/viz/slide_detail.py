@@ -502,13 +502,37 @@ def _render_openseadragon_viewer(
       }});
 
       const overlays = {overlays_json};
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
       viewer.addHandler("open", function() {{
         for (const o of overlays) {{
+          // SVG con viewBox 0..1 + stroke-width relativo (8% del lado del
+          // parche). Al hacer zoom el SVG escala con el overlay, así el
+          // borde se mantiene visualmente proporcional al parche en
+          // cualquier nivel de zoom — a vista lejana queda como un pequeño
+          // marquito con interior transparente, no como un relleno.
+          const svg = document.createElementNS(SVG_NS, "svg");
+          svg.setAttribute("viewBox", "0 0 1 1");
+          svg.setAttribute("preserveAspectRatio", "none");
+          svg.style.width = "100%";
+          svg.style.height = "100%";
+          svg.style.pointerEvents = "none";
+
+          const rect = document.createElementNS(SVG_NS, "rect");
+          rect.setAttribute("x", "0.04");
+          rect.setAttribute("y", "0.04");
+          rect.setAttribute("width", "0.92");
+          rect.setAttribute("height", "0.92");
+          rect.setAttribute("fill", "none");
+          rect.setAttribute("stroke", o.color);
+          rect.setAttribute("stroke-width", "0.08");
+          svg.appendChild(rect);
+
           const div = document.createElement("div");
           div.className = "osd-patch";
-          // Borde grueso de 4 px del color de la clase, fondo transparente.
-          div.style.border = `3px solid ${{o.color}}`;
           div.title = `#${{o.idx}} · ${{o.cls}}`;
+          div.appendChild(svg);
+
           viewer.addOverlay({{
             element: div,
             location: viewer.viewport.imageToViewportRectangle(
