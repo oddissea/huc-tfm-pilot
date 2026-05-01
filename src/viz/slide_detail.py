@@ -602,6 +602,7 @@ def _render_patch_predictions(
     patches_arr: np.ndarray | None = None,
     patch_size: int | None = None,
     attention: np.ndarray | None = None,
+    thumb_size: int = 48,
 ) -> None:
     """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
     + overlay del slide coloreado por predicción de cada parche."""
@@ -624,14 +625,16 @@ def _render_patch_predictions(
             and patch_size is not None and len(patches_arr) == len(pred_index)):
         st.markdown(
             "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
-            "azul CAR. La opacidad de cada parche se modula por la atención "
-            "del AttnMIL (parches con mayor peso en la decisión slide-level "
-            "se ven más saturados)."
+            "azul CAR. Borde coloreado por la clase predicha del clasificador "
+            "F4 sobre cada parche; el tejido queda visible para zoom."
         )
-        with st.spinner(f"Generando mapa de predicciones ({len(pred_index)} parches)…"):
+        with st.spinner(
+            f"Generando mapa de predicciones ({len(pred_index)} parches a {thumb_size} px)…"
+        ):
             fig_pred = _patch_predictions_overlay_figure(
                 positions, pred_index, patches_arr, patch_size,
                 attention=attention,
+                thumb_size=thumb_size,
             )
             st.plotly_chart(
                 fig_pred,
@@ -895,17 +898,41 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
         "ver el índice del parche."
     )
+    # Selector de resolución del mosaico. Se aplica tanto al mapa de
+    # atención como al de predicciones por parche (más abajo). Subir la
+    # resolución da más detalle al hacer zoom pero aumenta el payload de
+    # Plotly cuadráticamente y puede ralentizar el render en slides grandes.
+    thumb_options = {
+        "Rápido (48 px)": 48,
+        "Estándar (64 px)": 64,
+        "Alta (96 px)": 96,
+        "Máxima (128 px)": 128,
+    }
+    thumb_label = st.selectbox(
+        "Resolución de los mapas",
+        options=list(thumb_options.keys()),
+        index=0,
+        key=f"thumb_size_{job.job_id}",
+        help=(
+            "Tamaño de cada parche en el mosaico. La resolución alta facilita "
+            "el zoom para verificar el contenido del parche, pero aumenta el "
+            "tiempo de render en slides con muchos parches."
+        ),
+    )
+    thumb_size = thumb_options[thumb_label]
+
     # Cargamos originals una sola vez para reusar luego en el mapa de
     # predicciones por parche (sección de abajo).
     originals = _load_all_originals(job)
     patches_arr, patch_size = originals if originals is not None else (None, None)
 
     with st.spinner(
-        f"Generando overlay de atención ({n_patches} parches)…"
+        f"Generando overlay de atención ({n_patches} parches a {thumb_size} px)…"
     ):
         if patches_arr is not None and len(patches_arr) == len(attention):
             fig_overlay = _attention_overlay_figure(
                 positions, attention, patches_arr, patch_size, pred_class,
+                thumb_size=thumb_size,
             )
         else:
             fig_overlay = None
@@ -956,6 +983,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 patches_arr=originals_data[0] if originals_data[0] is not None else None,
                 patch_size=originals_data[1] if originals_data[1] is not None else None,
                 attention=attention,
+                thumb_size=thumb_size,
             )
             if result.get("has_patch_gt"):
                 _render_patch_validation(patch_eval, result)
