@@ -536,14 +536,15 @@ def _patch_predictions_overlay_figure(
     patch_raw_size: int,
     attention: np.ndarray | None,
     thumb_size: int = 48,
-    base_opacity: float = 0.65,
+    border_thickness: int = 3,
 ) -> go.Figure:
-    """Plotly versión del overlay de predicciones por parche. Hover muestra
-    `#índice + clase predicha + atención`.
+    """Plotly versión del overlay de predicciones por parche. El mosaico
+    está coloreado solo por borde (intensidad uniforme); `attention` se usa
+    en el hover para mostrar el peso del AttnMIL pero no en el visual.
     """
     overlay = _patch_predictions_overlay(
         positions, pred_index, patches_orig, patch_raw_size,
-        attention=attention, thumb_size=thumb_size, base_opacity=base_opacity,
+        thumb_size=thumb_size, border_thickness=border_thickness,
     )
     h, w, _ = overlay.shape
 
