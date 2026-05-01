@@ -223,10 +223,14 @@ def _render_queue():
     jobs_local = manager.list_jobs()
 
     # Detectar transiciones a DONE → rerun completo para refrescar la sección
-    # de detalle, que vive fuera del fragmento.
+    # de detalle, que vive fuera del fragmento. También incluimos has_dzi
+    # en la signature para que cuando el thread async de generación de DZI
+    # termine (mientras el patólogo mira un detalle), el visor aparezca
+    # automáticamente sin tener que hacer F5.
     done_signature = (
         sum(1 for j in jobs_local if j.status == JobStatus.DONE),
         sum(1 for j in jobs_local if j.status == JobStatus.FAILED),
+        sum(1 for j in jobs_local if j.extra.get("has_dzi") is True),
     )
     last_sig = st.session_state.get("queue_done_sig")
     st.session_state["queue_done_sig"] = done_signature
@@ -279,18 +283,31 @@ def _render_queue():
 # (información útil), colapsado si todo está finalizado para no ocupar
 # espacio.
 with st.expander(_label, expanded=bool(_n_active) or len(_jobs_now) == 0):
-    _render_queue()
     jobs = manager.list_jobs()
+    failed_jobs = [j for j in jobs if j.status == JobStatus.FAILED] if jobs else []
 
-    if jobs:
-        failed_jobs = [j for j in jobs if j.status == JobStatus.FAILED]
-        if failed_jobs:
-            with st.expander(f"Errores ({len(failed_jobs)})"):
-                for j in failed_jobs:
-                    st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
-                    st.code(j.error or "(sin detalle)")
+    # Streamlit no permite expanders anidados → usamos pestañas para
+    # tabla / editor GT / errores. Solo mostramos la pestaña de errores
+    # cuando hay alguno (si no, ocupa espacio sin valor).
+    tab_labels = ["📊 Tabla", "✏️ Editar GT"]
+    if failed_jobs:
+        tab_labels.append(f"⚠️ Errores ({len(failed_jobs)})")
+    tabs = st.tabs(tab_labels)
 
-        with st.expander("✏️ Editar etiquetas GT"):
+    with tabs[0]:
+        _render_queue()
+        if jobs:
+            col_a, _ = st.columns([1, 5])
+            with col_a:
+                if st.button("Limpiar cola"):
+                    for j in jobs:
+                        manager.delete(j.job_id)
+                    st.rerun()
+
+    with tabs[1]:
+        if not jobs:
+            st.caption("Sube algún fichero para empezar a editar etiquetas.")
+        else:
             st.caption(
                 "Corrige (o asigna) la etiqueta GT manualmente. Los cambios se "
                 "guardan al pulsar fuera de la celda y se reflejan al instante en "
@@ -323,12 +340,11 @@ with st.expander(_label, expanded=bool(_n_active) or len(_jobs_now) == 0):
                 if new_val != current:
                     manager.update_extra(j.job_id, slide_gt=new_val)
 
-        col_a, _ = st.columns([1, 5])
-        with col_a:
-            if st.button("Limpiar cola"):
-                for j in jobs:
-                    manager.delete(j.job_id)
-                st.rerun()
+    if failed_jobs:
+        with tabs[2]:
+            for j in failed_jobs:
+                st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
+                st.code(j.error or "(sin detalle)")
 
 
 # ---------------------------------------------------------------------------

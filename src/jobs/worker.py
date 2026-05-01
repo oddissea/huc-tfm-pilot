@@ -56,6 +56,37 @@ _stop_event = threading.Event()
 # Etapa 1: pre-inferencia
 # ---------------------------------------------------------------------------
 
+def _generate_dzi_async(manager: JobManager, job: Job) -> None:
+    """Genera el DZI en un thread paralelo a la inferencia. La inferencia
+    usa GPU + lectura de embeddings; pyvips usa CPU + RAM → no compiten
+    por recursos. El meta.json se actualiza con extra['has_dzi']=True
+    en cuanto termina; el frontend lo detecta vía el fragment de la cola
+    (que añade has_dzi al signature de cambios)."""
+    try:
+        from src.preprocessing.dzi import generate_dzi_from_h5
+        t = time.time()
+        _, (y_min, x_min) = generate_dzi_from_h5(
+            job.h5_path, job.job_dir, basename="slide",
+        )
+        elapsed = round(time.time() - t, 2)
+        manager.update_extra(
+            job.job_id,
+            has_dzi=True,
+            dzi_seconds=elapsed,
+            dzi_y_min=int(y_min),
+            dzi_x_min=int(x_min),
+        )
+        logger.info(
+            "DZI desde H5 (async) listo para %s en %.1fs (offset y=%d x=%d)",
+            job.short_id, elapsed, y_min, x_min,
+        )
+    except Exception as dzi_e:
+        logger.warning(
+            "Job %s: DZI gen async falló (%s) — el resto del flujo no se ve afectado",
+            job.short_id, dzi_e,
+        )
+
+
 def _do_preprocess(manager: JobManager, job: Job) -> None:
     try:
         extra: dict = {}
@@ -70,34 +101,21 @@ def _do_preprocess(manager: JobManager, job: Job) -> None:
         else:
             raise ValueError(f"Tipo de input desconocido: {job.input_type}")
 
-        # Genera tiles DZI stitcheando los parches del H5 en una imagen
-        # 'solo tejido'. Funciona para H5 y TIFF (los TIFF ya pasaron por
-        # convert_tiff_to_h5 arriba). Coordenadas idénticas a las del
-        # AttnMIL → overlay pixel-perfect con las predicciones.
-        # Best effort: si falla, seguimos con inferencia y mosaicos como
-        # fallback. Status quo si pyvips/libvips no están disponibles.
-        try:
-            from src.preprocessing.dzi import generate_dzi_from_h5
-            t1 = time.time()
-            _dzi_path, (y_min, x_min) = generate_dzi_from_h5(
-                job.h5_path, job.job_dir, basename="slide",
-            )
-            extra["dzi_seconds"] = round(time.time() - t1, 2)
-            extra["has_dzi"] = True
-            extra["dzi_y_min"] = int(y_min)
-            extra["dzi_x_min"] = int(x_min)
-            logger.info(
-                "DZI desde H5 generado para %s en %.1fs (offset y=%d x=%d)",
-                job.short_id, extra["dzi_seconds"], y_min, x_min,
-            )
-        except Exception as dzi_e:
-            logger.warning(
-                "Job %s: DZI generation falló (%s) — continúo sin viewer pro",
-                job.short_id, dzi_e,
-            )
-
         manager.update_status(job.job_id, JobStatus.CONVERTED, extra=extra)
         manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
+
+        # Genera DZI en paralelo a la inferencia. La inferencia arranca
+        # tras el siguiente poll del worker; el DZI corre como daemon
+        # thread sin bloquear ese flujo. Si el DZI tarda más que la
+        # inferencia, el usuario verá DONE primero y el visor aparece
+        # poco después (la fragment de la cola hace rerun cuando detecta
+        # has_dzi en el signature).
+        threading.Thread(
+            target=_generate_dzi_async,
+            args=(manager, job),
+            name=f"dzi-{job.short_id}",
+            daemon=True,
+        ).start()
 
     except Exception as e:
         logger.exception("Job %s falló en preprocesado", job.short_id)
