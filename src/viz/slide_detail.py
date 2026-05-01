@@ -602,7 +602,7 @@ def _render_patch_predictions(
     patches_arr: np.ndarray | None = None,
     patch_size: int | None = None,
     attention: np.ndarray | None = None,
-    thumb_size: int = 48,
+    job_id: str | None = None,
 ) -> None:
     """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
     + overlay del slide coloreado por predicción de cada parche."""
@@ -628,6 +628,20 @@ def _render_patch_predictions(
             "azul CAR. Borde coloreado por la clase predicha del clasificador "
             "F4 sobre cada parche; el tejido queda visible para zoom."
         )
+        thumb_options = {"48 px": 48, "64 px": 64, "96 px": 96, "128 px": 128}
+        thumb_label = st.radio(
+            "Resolución del mapa de predicciones",
+            options=list(thumb_options.keys()),
+            index=0,
+            horizontal=True,
+            key=f"thumb_size_pred_{job_id}" if job_id else "thumb_size_pred",
+            help=(
+                "Tamaño de cada parche en el mosaico. Resolución alta = más "
+                "detalle al hacer zoom, pero más tiempo de render en slides "
+                "con muchos parches."
+            ),
+        )
+        thumb_size = thumb_options[thumb_label]
         with st.spinner(
             f"Generando mapa de predicciones ({len(pred_index)} parches a {thumb_size} px)…"
         ):
@@ -898,28 +912,23 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
         "ver el índice del parche."
     )
-    # Selector de resolución del mosaico. Se aplica tanto al mapa de
-    # atención como al de predicciones por parche (más abajo). Subir la
-    # resolución da más detalle al hacer zoom pero aumenta el payload de
-    # Plotly cuadráticamente y puede ralentizar el render en slides grandes.
-    thumb_options = {
-        "Rápido (48 px)": 48,
-        "Estándar (64 px)": 64,
-        "Alta (96 px)": 96,
-        "Máxima (128 px)": 128,
-    }
-    thumb_label = st.selectbox(
-        "Resolución de los mapas",
+    # Selector de resolución del mosaico (radio horizontal, en su propia
+    # sección para que el patólogo pueda subir solo este mapa sin afectar
+    # el de predicciones por parche).
+    thumb_options = {"48 px": 48, "64 px": 64, "96 px": 96, "128 px": 128}
+    thumb_label = st.radio(
+        "Resolución del mapa de atención",
         options=list(thumb_options.keys()),
         index=0,
-        key=f"thumb_size_{job.job_id}",
+        horizontal=True,
+        key=f"thumb_size_att_{job.job_id}",
         help=(
-            "Tamaño de cada parche en el mosaico. La resolución alta facilita "
-            "el zoom para verificar el contenido del parche, pero aumenta el "
-            "tiempo de render en slides con muchos parches."
+            "Tamaño de cada parche en el mosaico. Resolución alta = más "
+            "detalle al hacer zoom, pero más tiempo de render en slides "
+            "con muchos parches."
         ),
     )
-    thumb_size = thumb_options[thumb_label]
+    thumb_size_att = thumb_options[thumb_label]
 
     # Cargamos originals una sola vez para reusar luego en el mapa de
     # predicciones por parche (sección de abajo).
@@ -927,12 +936,12 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     patches_arr, patch_size = originals if originals is not None else (None, None)
 
     with st.spinner(
-        f"Generando overlay de atención ({n_patches} parches a {thumb_size} px)…"
+        f"Generando overlay de atención ({n_patches} parches a {thumb_size_att} px)…"
     ):
         if patches_arr is not None and len(patches_arr) == len(attention):
             fig_overlay = _attention_overlay_figure(
                 positions, attention, patches_arr, patch_size, pred_class,
-                thumb_size=thumb_size,
+                thumb_size=thumb_size_att,
             )
         else:
             fig_overlay = None
@@ -983,7 +992,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 patches_arr=originals_data[0] if originals_data[0] is not None else None,
                 patch_size=originals_data[1] if originals_data[1] is not None else None,
                 attention=attention,
-                thumb_size=thumb_size,
+                job_id=job.job_id,
             )
             if result.get("has_patch_gt"):
                 _render_patch_validation(patch_eval, result)
