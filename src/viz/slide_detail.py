@@ -822,56 +822,14 @@ def _render_patch_predictions(
     )
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
 
-    # Mapa de predicciones por parche (visor OpenSeadragon con overlays SVG)
+    # El visor OpenSeadragon se renderiza directamente desde render_slide_detail
+    # (compartido entre las vistas 'Atención' y 'Predicciones'). Aquí solo
+    # nos ocupamos del bar chart de distribución (ya pintado arriba) y el
+    # inspector individual de parche.
     n = len(pred_index)
     sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
     if sel_key not in st.session_state:
         st.session_state[sel_key] = -1
-
-    if job is not None and job.dzi_path.exists():
-        st.markdown(
-            "**Mapa del portaobjetos** — visor con tiles multi-resolución. "
-            "Activa las capas que necesites:"
-        )
-        toggle_cols = st.columns([1, 1, 6])
-        with toggle_cols[0]:
-            show_pred = st.toggle(
-                "🟦 Predicciones",
-                value=True,
-                key=f"toggle_pred_{job_id}",
-                help="Borde coloreado por la clase predicha por F4 en cada parche.",
-            )
-        with toggle_cols[1]:
-            show_att = st.toggle(
-                "🔥 Atención",
-                value=False,
-                key=f"toggle_att_{job_id}",
-                help=(
-                    f"Relleno {slide_pred_class} con opacidad ∝ atención del "
-                    "AttnMIL — destaca los parches con mayor peso en la "
-                    "decisión slide-level."
-                ),
-            )
-        osd_offset = (
-            int(job.extra.get("dzi_y_min", 0)),
-            int(job.extra.get("dzi_x_min", 0)),
-        )
-        _render_openseadragon_viewer(
-            job,
-            positions=positions,
-            pred_index=pred_index,
-            patch_raw_size=patch_size,
-            attention=attention,
-            slide_pred_class=slide_pred_class,
-            show_predictions=show_pred,
-            show_attention=show_att,
-            dzi_offset=osd_offset,
-        )
-        st.caption(
-            "Pan con arrastrar, zoom con rueda. Las áreas blancas son zonas "
-            "que el filtro de tejido descartó al parchear el portaobjetos. "
-            "Pasa el ratón sobre un parche para ver índice + clase + atención."
-        )
 
     if (positions is not None and patches_arr is not None
             and patch_size is not None and len(patches_arr) == len(pred_index)):
@@ -1152,7 +1110,16 @@ def render_session_metrics(jobs: list) -> None:
 # ---------------------------------------------------------------------------
 
 def render_slide_detail(job: "Job", top_k: int = 5) -> None:
-    """Renderiza la vista detallada de un job en estado DONE."""
+    """Renderiza la vista detallada de un job en estado DONE.
+
+    Layout:
+        1. Encabezado con filename
+        2. Visor OpenSeadragon (capa según el modo activo)
+        3. Selector segmentado: 'Atención' | 'Predicciones a nivel de parche'
+        4. Sección condicional según el modo:
+           - Atención: métricas slide-level + barras + aviso confianza + top-K
+           - Predicciones: bar chart distribución + inspector + matriz GT (si)
+    """
     result = _load_result(job)
     if result is None:
         st.warning("No hay resultado para este job (¿aún en proceso?).")
@@ -1163,52 +1130,10 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     pred_class = result["predicted_class"]
     max_prob = max(probs)
 
-    # ─── Encabezado: meta del slide ─────────────────────────────────────────
+    # ─── Encabezado ─────────────────────────────────────────────────────────
     st.subheader(f"Resultado · {job.original_filename}")
-    cols = st.columns(4)
-    cols[0].metric("Predicción", pred_class)
-    cols[1].metric("Confianza", f"{max_prob:.1%}")
-    cols[2].metric("Parches", str(result["n_patches"]))
-    cols[3].metric("Tiempo", f"{result['elapsed_seconds']:.2f} s")
 
-    # ─── Aviso clínico sobre la interpretación de la confianza ──────────────
-    st.info(
-        "**La confianza no es una probabilidad de acierto.** Es la media del "
-        "*softmax* del ensemble de 5 modelos *AttnMIL* en la clase predicha. "
-        "Un valor alto indica que los 5 modelos coinciden con *softmax* "
-        "saturado, **no** que la predicción sea correcta esa proporción de "
-        "veces. El *softmax* no está calibrado: interprétalo como "
-        "**seguridad relativa del modelo**, no como certeza diagnóstica.\n\n"
-        "**TFM vs producción.** La memoria del TFM (§5.9) reporta "
-        "**92,8 ± 1,1 %** *accuracy* mediante validación cruzada 5-fold "
-        "*multi-seed* sobre los 91 portaobjetos clínicos del HUC: esa es la "
-        "estimación honest del rendimiento esperado sobre portaobjetos "
-        "**nuevos**. El *ensemble* desplegado en esta app es un "
-        "reentrenamiento posterior de **5** modelos sobre los 91 completos "
-        "**sin holdout** (práctica estándar al pasar de evaluación a "
-        "producción) — sobre portaobjetos del propio cohort §5.9 las "
-        "predicciones serán muy seguras (todos los modelos los vieron en "
-        "*training*), pero esa cifra **no es comparable** con §5.9. "
-        "**Para portaobjetos nuevos esperar ~92,8 % accuracy.**\n\n"
-        "Las barras de error de la sección siguiente miden la dispersión "
-        "entre los 5 modelos del *ensemble*: una *std* alta indica "
-        "desacuerdo entre miembros."
-    )
-
-    # ─── Probabilidades + gauge ─────────────────────────────────────────────
-    col_bars, col_gauge = st.columns([3, 2])
-    with col_bars:
-        st.plotly_chart(
-            _probability_bars(probs, stds, pred_class),
-            use_container_width=True,
-        )
-    with col_gauge:
-        st.plotly_chart(
-            _confidence_gauge(max_prob, pred_class),
-            use_container_width=True,
-        )
-
-    # ─── Atención: requiere attention.npy + positions del H5 ────────────────
+    # ─── Carga de artefactos compartidos por ambas vistas ───────────────────
     attention = _load_attention(job)
     if attention is None:
         st.info("Sin pesos de atención disponibles para este job.")
@@ -1216,59 +1141,138 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
 
     h5_meta = _load_h5_meta(job)
     if h5_meta is None:
-        st.info("No se pudo leer las posiciones del H5 para el mapa de atención.")
+        st.info("No se pudo leer las posiciones del H5.")
         return
     positions, categories = h5_meta
 
-    # El antiguo mosaico Plotly del mapa de atención ya está cubierto por
-    # el toggle 'Atención' del visor OpenSeadragon de la sección de
-    # predicciones. Aquí solo cargamos los originals (necesarios para el
-    # top-K de parches y el inspector individual de abajo).
     originals = _load_all_originals(job)
     patches_arr, patch_size = originals if originals is not None else (None, None)
 
-    # Top-K parches por atención (debajo del overlay para contexto detallado)
-    st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
-    k = min(top_k, len(attention))
-    top_idx = np.argsort(attention)[-k:][::-1].tolist()
-    with st.spinner(f"Cargando top-{k} parches…"):
-        top_patches = _load_top_patches(job, top_idx)
-
-    if top_patches:
-        cols = st.columns(k)
-        for i, (idx, patch) in enumerate(zip(top_idx, top_patches)):
-            with cols[i]:
-                cat = categories[idx] if idx < len(categories) else "?"
-                cat_label = f" · {cat}" if cat not in ("?", "XXX") else ""
-                uri = _patch_to_data_uri(patch)
-                st.markdown(
-                    f'<img src="{uri}" style="width:100%;border-radius:4px;'
-                    f'border:1px solid #e0e0e0;">'
-                    f'<div style="text-align:center;font-size:0.85rem;'
-                    f'color:#555;margin-top:4px;">'
-                    f'#{idx} · α={attention[idx]:.4f}{cat_label}</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # Predicciones por parche del clasificador F4: distribución +
-    # mapa de slide coloreado por clase predicha (verde/naranja/azul).
-    # Validación con matriz de confusión solo si el H5 trae GT. Slot fijo
-    # con st.empty() para que Streamlit reconcilie limpio al cambiar de slide.
-    patch_section_slot = st.empty()
     patch_eval = _load_patch_eval(job)
-    if patch_eval is not None:
-        with patch_section_slot.container():
-            # Reusamos los originals + patch_size del overlay de atención
-            # (ya cargados arriba) para no leer el H5 dos veces.
-            originals_data = originals if originals is not None else (None, None)
-            _render_patch_predictions(
-                patch_eval,
-                positions=positions,
-                patches_arr=originals_data[0] if originals_data[0] is not None else None,
-                patch_size=originals_data[1] if originals_data[1] is not None else None,
-                attention=attention,
-                job=job,
-                slide_pred_class=pred_class,
+    pred_index = (
+        np.asarray(patch_eval["pred_index"], dtype=np.int64)
+        if patch_eval is not None and "pred_index" in patch_eval
+        else None
+    )
+
+    # ─── Selector segmentado: Atención | Predicciones por parche ───────────
+    OPT_ATT = "👁️ Atención"
+    OPT_PRED = "🔮 Predicciones a nivel de parche"
+    mode = st.segmented_control(
+        "Modo de visualización",
+        options=[OPT_ATT, OPT_PRED],
+        default=OPT_ATT,
+        key=f"view_mode_{job.job_id}",
+        label_visibility="collapsed",
+    )
+    if mode is None:
+        mode = OPT_ATT
+    show_att = mode == OPT_ATT
+    show_pred = mode == OPT_PRED
+
+    # ─── Visor OpenSeadragon con la capa correspondiente ────────────────────
+    if job.dzi_path.exists() and pred_index is not None:
+        osd_offset = (
+            int(job.extra.get("dzi_y_min", 0)),
+            int(job.extra.get("dzi_x_min", 0)),
+        )
+        _render_openseadragon_viewer(
+            job,
+            positions=positions,
+            pred_index=pred_index,
+            patch_raw_size=patch_size,
+            attention=attention,
+            slide_pred_class=pred_class,
+            show_predictions=show_pred,
+            show_attention=show_att,
+            dzi_offset=osd_offset,
+        )
+        st.caption(
+            "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
+            "parche para ver `#índice · clase · atención`. Las áreas blancas "
+            "son zonas que el filtro de tejido descartó al parchear."
+        )
+    else:
+        st.info(
+            "El visor multi-resolución no está disponible para este job "
+            "(falta DZI). Las métricas y mapas se muestran de todos modos."
+        )
+
+    # ─── Vista 'Atención': métricas slide-level + barras + aviso + top-K ────
+    if show_att:
+        cols = st.columns(4)
+        cols[0].metric("Predicción", pred_class)
+        cols[1].metric("Confianza", f"{max_prob:.1%}")
+        cols[2].metric("Parches", str(result["n_patches"]))
+        cols[3].metric("Tiempo", f"{result['elapsed_seconds']:.2f} s")
+
+        col_bars, col_gauge = st.columns([3, 2])
+        with col_bars:
+            st.plotly_chart(
+                _probability_bars(probs, stds, pred_class),
+                use_container_width=True,
             )
-            if result.get("has_patch_gt"):
-                _render_patch_validation(patch_eval, result)
+        with col_gauge:
+            st.plotly_chart(
+                _confidence_gauge(max_prob, pred_class),
+                use_container_width=True,
+            )
+
+        st.info(
+            "**La confianza no es una probabilidad de acierto.** Es la media "
+            "del *softmax* del ensemble de 5 modelos *AttnMIL* en la clase "
+            "predicha. Un valor alto indica que los 5 modelos coinciden con "
+            "*softmax* saturado, **no** que la predicción sea correcta esa "
+            "proporción de veces. El *softmax* no está calibrado: "
+            "interprétalo como **seguridad relativa del modelo**, no como "
+            "certeza diagnóstica.\n\n"
+            "**TFM vs producción.** La memoria del TFM (§5.9) reporta "
+            "**92,8 ± 1,1 %** *accuracy* mediante validación cruzada 5-fold "
+            "*multi-seed* sobre los 91 portaobjetos clínicos del HUC: esa "
+            "es la estimación honest del rendimiento esperado sobre "
+            "portaobjetos **nuevos**. El *ensemble* desplegado en esta app "
+            "es un reentrenamiento posterior de **5** modelos sobre los 91 "
+            "completos **sin holdout** (práctica estándar al pasar de "
+            "evaluación a producción) — sobre portaobjetos del propio "
+            "cohort §5.9 las predicciones serán muy seguras (todos los "
+            "modelos los vieron en *training*), pero esa cifra **no es "
+            "comparable** con §5.9. **Para portaobjetos nuevos esperar "
+            "~92,8 % accuracy.**\n\n"
+            "Las barras de error miden la dispersión entre los 5 modelos "
+            "del *ensemble*: una *std* alta indica desacuerdo entre miembros."
+        )
+
+        st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
+        k = min(top_k, len(attention))
+        top_idx = np.argsort(attention)[-k:][::-1].tolist()
+        with st.spinner(f"Cargando top-{k} parches…"):
+            top_patches = _load_top_patches(job, top_idx)
+        if top_patches:
+            cols = st.columns(k)
+            for i, (idx, patch) in enumerate(zip(top_idx, top_patches)):
+                with cols[i]:
+                    cat = categories[idx] if idx < len(categories) else "?"
+                    cat_label = f" · {cat}" if cat not in ("?", "XXX") else ""
+                    uri = _patch_to_data_uri(patch)
+                    st.markdown(
+                        f'<img src="{uri}" style="width:100%;border-radius:4px;'
+                        f'border:1px solid #e0e0e0;">'
+                        f'<div style="text-align:center;font-size:0.85rem;'
+                        f'color:#555;margin-top:4px;">'
+                        f'#{idx} · α={attention[idx]:.4f}{cat_label}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+    # ─── Vista 'Predicciones por parche': bar chart + inspector + matriz ────
+    elif show_pred and patch_eval is not None:
+        _render_patch_predictions(
+            patch_eval,
+            positions=positions,
+            patches_arr=patches_arr,
+            patch_size=patch_size,
+            attention=attention,
+            job=job,
+            slide_pred_class=pred_class,
+        )
+        if result.get("has_patch_gt"):
+            _render_patch_validation(patch_eval, result)
