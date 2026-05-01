@@ -468,13 +468,20 @@ def _render_openseadragon_viewer(
     overlays_json = "[]"
     y_off, x_off = dzi_offset
     sr, sg, sb = CLASS_COLORS_RGB.get(slide_pred_class, (0.5, 0.5, 0.5))
+    # Carga las pred_probs (N, 3) del patch_eval.npz para incluirlas en el
+    # hover de cada parche.
+    pe = _load_patch_eval(job)
+    pred_probs_arr = (
+        np.asarray(pe["pred_probs"])
+        if (pe is not None and "pred_probs" in pe and pred_index is not None
+            and pe["pred_probs"].shape[0] == len(pred_index))
+        else None
+    )
+
     if (positions is not None and pred_index is not None
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         att_arr = np.asarray(attention) if attention is not None else None
         att_max = float(att_arr.max()) if (att_arr is not None and att_arr.size > 0) else 0.0
-        # patch_probs viene del classifier F4 — útil para mostrar la confianza
-        # de la predicción del PARCHE (no del slide) en el hover en modo
-        # 'predicciones'. Se carga desde el patch_eval.npz si está disponible.
         items = []
         for i, (pos, p) in enumerate(zip(positions, pred_index)):
             cls = CLASS_NAMES[int(p)]
@@ -487,33 +494,24 @@ def _render_openseadragon_viewer(
                 "color": color,
                 "idx": i,
                 "cls": cls,
+                "pos_y": int(pos[0]),
+                "pos_x": int(pos[1]),
             }
             if att_arr is not None:
                 a = float(att_arr[i])
                 rel = a / att_max if att_max > 0 else 0.0
                 item["att"] = round(a, 4)
                 item["att_rel"] = round(rel, 3)
-                # Color del slide-level con alpha=relative attention (max 0.85
-                # para no tapar el tejido por completo).
                 item["att_fill"] = (
                     f"rgba({int(sr*255)},{int(sg*255)},{int(sb*255)},"
                     f"{round(min(rel * 0.85, 0.85), 3)})"
                 )
+            if pred_probs_arr is not None:
+                pp = pred_probs_arr[i]
+                # Probs en orden CLASS_NAMES = (ADE, NOR, CAR)
+                item["probs"] = [round(float(v), 3) for v in pp]
             items.append(item)
         overlays_json = json.dumps(items)
-
-    # Pasamos también `pred_probs` por separado para construir hints según
-    # el modo activo. Lectura desde el job (no acoplamos a la signature).
-    patch_eval = _load_patch_eval(job)
-    pred_probs_json = "null"
-    if (patch_eval is not None and "pred_probs" in patch_eval
-            and pred_index is not None):
-        pp = np.asarray(patch_eval["pred_probs"])
-        if pp.shape[0] == len(pred_index):
-            # Solo guardamos la prob de la clase predicha por parche para
-            # no inflar el JSON. Suficiente para el hint clínico.
-            pp_max = pp[np.arange(len(pred_index)), pred_index].astype(float)
-            pred_probs_json = json.dumps([round(float(v), 3) for v in pp_max])
 
     # `data-show-pred` y `data-show-att` se interpolan al HTML para que
     # el JS pinte/oculte cada layer. Cambiar los toggles en Streamlit
@@ -546,13 +544,17 @@ def _render_openseadragon_viewer(
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
+        // Permite hacer zoom hasta 4× más allá de la resolución nativa de
+        // los tiles (por defecto 1.1x). El patólogo puede inspeccionar
+        // morfología fina sin necesidad del panel del inspector aparte.
+        maxZoomPixelRatio: 4,
       }});
 
       const overlays = {overlays_json};
-      const PRED_PROBS = {pred_probs_json};
       const SHOW_PRED = {show_pred_js};
       const SHOW_ATT = {show_att_js};
       const SVG_NS = "http://www.w3.org/2000/svg";
+      const CLASSES = ["ADE", "NOR", "CAR"];
 
       viewer.addHandler("open", function() {{
         for (const o of overlays) {{
@@ -584,23 +586,25 @@ def _render_openseadragon_viewer(
 
           const div = document.createElement("div");
           div.className = "osd-patch";
-          // Hint adaptativo según el modo activo:
-          //   - Predicciones: foco en la confianza F4 del parche (clase + prob)
-          //   - Atención: foco en peso del AttnMIL (relativo al máximo)
-          let tip;
-          if (SHOW_PRED) {{
-            const prob = (PRED_PROBS && PRED_PROBS[o.idx] !== undefined)
-              ? ` · F4 prob ${{(PRED_PROBS[o.idx] * 100).toFixed(1)}}%`
-              : "";
-            tip = `#${{o.idx}} · clase predicha ${{o.cls}}${{prob}}`;
-          }} else if (SHOW_ATT && o.att !== undefined) {{
-            const pct = (o.att_rel * 100).toFixed(0);
-            tip = `#${{o.idx}} · atención AttnMIL ${{o.att.toFixed(4)}} `
-                + `(${{pct}}% del máximo) · clase F4 ${{o.cls}}`;
-          }} else {{
-            tip = `#${{o.idx}} · ${{o.cls}}`;
+          // Hint completo en multilínea — replicaba lo que mostraba el
+          // antiguo panel del inspector (ahora retirado): clase, 3 probs
+          // del clasificador F4, atención AttnMIL absoluta + relativa,
+          // y posición del parche en el slide. Los browsers renderizan
+          // los \\n como saltos de línea en el title nativo.
+          let lines = [
+            `parche #${{o.idx}}`,
+            `predicción F4: ${{o.cls}}`,
+          ];
+          if (o.probs) {{
+            const parts = o.probs.map((p, i) => `${{CLASSES[i]}}=${{p.toFixed(3)}}`);
+            lines.push(`probs F4: ${{parts.join(" · ")}}`);
           }}
-          div.title = tip;
+          if (o.att !== undefined) {{
+            const pct = (o.att_rel * 100).toFixed(0);
+            lines.push(`atención AttnMIL: ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`);
+          }}
+          lines.push(`posición: y=${{o.pos_y}}, x=${{o.pos_x}}`);
+          div.title = lines.join("\\n");
           div.appendChild(svg);
 
           viewer.addOverlay({{
@@ -850,117 +854,13 @@ def _render_patch_predictions(
     )
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
 
-    # El visor OpenSeadragon se renderiza directamente desde render_slide_detail
-    # (compartido entre las vistas 'Atención' y 'Predicciones'). Aquí solo
-    # nos ocupamos del bar chart de distribución (ya pintado arriba) y el
-    # inspector individual de parche.
-    n = len(pred_index)
-    sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
-    if sel_key not in st.session_state:
-        st.session_state[sel_key] = -1
-
-    if (positions is not None and patches_arr is not None
-            and patch_size is not None and len(patches_arr) == len(pred_index)):
-
-        @st.fragment
-        def _render_inspector():
-            """Inspector aislado: navegación con ←/→ y selectbox solo
-            rerunna este fragmento, NO redibuja el mosaico de arriba.
-            (El click sobre un parche del mosaico Plotly sí dispara un
-            rerun completo de la página por limitación de Streamlit.)"""
-            st.markdown(
-                "**Inspeccionar parche en detalle** — *navega con ←/→ o "
-                "elige el índice; verás el parche a tamaño nativo (300×300) "
-                "junto a su predicción y atención.*"
-            )
-
-            def _nav_idx(delta: int, key: str, n_max: int) -> None:
-                cur = st.session_state.get(key, -1)
-                st.session_state[key] = max(0, min(n_max - 1, cur + delta))
-
-            ctrl_cols = st.columns([1, 6, 1])
-            with ctrl_cols[0]:
-                st.button(
-                    "←", key=f"prev_{sel_key}",
-                    disabled=(st.session_state[sel_key] <= 0),
-                    on_click=_nav_idx, args=(-1, sel_key, n),
-                )
-            with ctrl_cols[1]:
-                options = [-1] + list(range(n))
-                st.selectbox(
-                    "Índice del parche (—  = ocultar)",
-                    options=options,
-                    format_func=lambda i: "—" if i == -1 else f"#{i}",
-                    key=sel_key,
-                    label_visibility="collapsed",
-                )
-            with ctrl_cols[2]:
-                st.button(
-                    "→", key=f"next_{sel_key}",
-                    disabled=(st.session_state[sel_key] >= n - 1),
-                    on_click=_nav_idx, args=(1, sel_key, n),
-                )
-
-            idx = st.session_state[sel_key]
-            if 0 <= idx < n:
-                patch_full = np.asarray(patches_arr[idx])
-                pred_probs = patch_eval.get("pred_probs")
-                probs_str = ""
-                if pred_probs is not None:
-                    pp = np.asarray(pred_probs)[idx]
-                    probs_str = " · ".join(f"{c}={p:.3f}" for c, p in zip(CLASS_NAMES, pp))
-                pred_cls = CLASS_NAMES[int(pred_index[idx])]
-                color_hex = CLASS_COLORS[pred_cls]
-
-                gt_label = None
-                cats_ternary = patch_eval.get("cats_ternary")
-                if cats_ternary is not None:
-                    cat = str(cats_ternary[idx])
-                    if cat in CLASS_NAMES:
-                        gt_label = cat
-                    elif cat == "EXCLUDED":
-                        cats_raw = patch_eval.get("cats_raw")
-                        if cats_raw is not None:
-                            gt_label = f"excluido ({str(cats_raw[idx])})"
-
-                att_val = float(attention[idx]) if attention is not None else None
-                att_rel = (
-                    att_val / float(attention.max())
-                    if (att_val is not None and attention.max() > 0)
-                    else None
-                )
-
-                img_col, info_col = st.columns([1, 1])
-                with img_col:
-                    uri = _patch_to_data_uri(patch_full)
-                    st.markdown(
-                        f'<img src="{uri}" style="width:100%;border:4px solid {color_hex};'
-                        f'border-radius:6px;">'
-                        f'<div style="text-align:center;font-size:0.9rem;'
-                        f'color:#555;margin-top:6px;">parche #{idx} · '
-                        f'tamaño nativo {patch_full.shape[1]}×{patch_full.shape[0]} px</div>',
-                        unsafe_allow_html=True,
-                    )
-                with info_col:
-                    st.metric("Predicción F4", pred_cls)
-                    if probs_str:
-                        st.caption(f"Probabilidades F4: {probs_str}")
-                    if att_val is not None:
-                        delta_text = (
-                            f"{att_rel:.0%} del máximo" if att_rel is not None else None
-                        )
-                        st.metric(
-                            "Atención AttnMIL",
-                            f"{att_val:.4f}",
-                            delta=delta_text,
-                            delta_color="off",
-                        )
-                    if gt_label is not None:
-                        st.metric("GT (etiqueta del H5)", gt_label)
-                    pos_y, pos_x = int(positions[idx][0]), int(positions[idx][1])
-                    st.caption(f"Posición en slide: y={pos_y}, x={pos_x}")
-
-        _render_inspector()
+    # Antiguo 'Inspector parche en detalle' eliminado: con el visor
+    # OpenSeadragon arriba (maxZoomPixelRatio=4) el patólogo puede hacer
+    # zoom hasta 4× la resolución nativa del DZI sobre cualquier parche,
+    # y el hover sobre cada parche muestra ya toda la info que daba el
+    # inspector (clase, 3 probs F4, atención AttnMIL absoluta + relativa,
+    # posición). El bar chart de distribución por clase (arriba) y la
+    # matriz de confusión patch-level (abajo si hay GT) cubren el resto.
 
 
 def _render_patch_validation(patch_eval: dict, result: dict) -> None:
