@@ -159,10 +159,19 @@ if new_uploads:
 
 
 # ---------------------------------------------------------------------------
-# Cola de procesamiento
+# Cola de procesamiento (envuelta en un expander para no ocupar pantalla
+# cuando el patólogo está mirando un resultado)
 # ---------------------------------------------------------------------------
 
-st.header("Cola")
+_jobs_now = manager.list_jobs()
+_n_active = sum(1 for _j in _jobs_now if _j.status in {
+    JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.CONVERTED,
+    JobStatus.READY_FOR_INFERENCE, JobStatus.PREDICTING,
+})
+_label = f"📋 Cola ({len(_jobs_now)} portaobjetos"
+if _n_active:
+    _label += f", {_n_active} en curso"
+_label += ")"
 
 STATUS_LABELS = {
     JobStatus.QUEUED: "🕒 En cola",
@@ -265,56 +274,61 @@ def _render_queue():
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 
-_render_queue()
-jobs = manager.list_jobs()
+# Expander que envuelve la tabla + sub-expanders (errores, editor GT) +
+# botón limpiar. Default: expanded si hay actividad o si está vacía
+# (información útil), colapsado si todo está finalizado para no ocupar
+# espacio.
+with st.expander(_label, expanded=bool(_n_active) or len(_jobs_now) == 0):
+    _render_queue()
+    jobs = manager.list_jobs()
 
-if jobs:
-    failed_jobs = [j for j in jobs if j.status == JobStatus.FAILED]
-    if failed_jobs:
-        with st.expander(f"Errores ({len(failed_jobs)})"):
-            for j in failed_jobs:
-                st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
-                st.code(j.error or "(sin detalle)")
+    if jobs:
+        failed_jobs = [j for j in jobs if j.status == JobStatus.FAILED]
+        if failed_jobs:
+            with st.expander(f"Errores ({len(failed_jobs)})"):
+                for j in failed_jobs:
+                    st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
+                    st.code(j.error or "(sin detalle)")
 
-    with st.expander("✏️ Editar etiquetas GT"):
-        st.caption(
-            "Corrige (o asigna) la etiqueta GT manualmente. Los cambios se "
-            "guardan al pulsar fuera de la celda y se reflejan al instante en "
-            "'Métricas acumuladas'."
-        )
-        editor_df = pd.DataFrame([
-            {
-                "Fichero": j.original_filename,
-                "GT": j.extra.get("slide_gt") or "—",
-                "Predicción": j.extra.get("predicted_class", "—"),
-            }
-            for j in jobs
-        ])
-        edited = st.data_editor(
-            editor_df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "GT": st.column_config.SelectboxColumn(
-                    options=["—", "NOR", "ADE", "CAR"],
-                    required=False,
-                ),
-            },
-            disabled=["Fichero", "Predicción"],
-            key="gt_editor",
-        )
-        for j, new_gt in zip(jobs, edited["GT"]):
-            new_val: str | None = None if new_gt == "—" else new_gt
-            current = j.extra.get("slide_gt")
-            if new_val != current:
-                manager.update_extra(j.job_id, slide_gt=new_val)
+        with st.expander("✏️ Editar etiquetas GT"):
+            st.caption(
+                "Corrige (o asigna) la etiqueta GT manualmente. Los cambios se "
+                "guardan al pulsar fuera de la celda y se reflejan al instante en "
+                "'Métricas acumuladas'."
+            )
+            editor_df = pd.DataFrame([
+                {
+                    "Fichero": j.original_filename,
+                    "GT": j.extra.get("slide_gt") or "—",
+                    "Predicción": j.extra.get("predicted_class", "—"),
+                }
+                for j in jobs
+            ])
+            edited = st.data_editor(
+                editor_df,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "GT": st.column_config.SelectboxColumn(
+                        options=["—", "NOR", "ADE", "CAR"],
+                        required=False,
+                    ),
+                },
+                disabled=["Fichero", "Predicción"],
+                key="gt_editor",
+            )
+            for j, new_gt in zip(jobs, edited["GT"]):
+                new_val: str | None = None if new_gt == "—" else new_gt
+                current = j.extra.get("slide_gt")
+                if new_val != current:
+                    manager.update_extra(j.job_id, slide_gt=new_val)
 
-    col_a, _ = st.columns([1, 5])
-    with col_a:
-        if st.button("Limpiar cola"):
-            for j in jobs:
-                manager.delete(j.job_id)
-            st.rerun()
+        col_a, _ = st.columns([1, 5])
+        with col_a:
+            if st.button("Limpiar cola"):
+                for j in jobs:
+                    manager.delete(j.job_id)
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------
