@@ -11,6 +11,7 @@
       pointer-events: auto;
       cursor: pointer;
     }
+    .osd-patch svg { display: block; width: 100%; height: 100%; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -19,13 +20,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
   <script>
     // Streamlit component bridge.
-    // Streamlit inyecta un objeto global window.Streamlit con eventos
-    // RENDER_EVENT y métodos setComponentReady, setFrameHeight, setComponentValue.
-
     let viewer = null;
     let initialized = false;
-    let lastClickIdx = null;
-    let lastClickTs = null;
+    // Mapas idx → DOM nodes (rect del borde, rect del fill) para no
+    // recrear overlays en cada cambio de toggle.
+    const strokeRects = new Map();
+    const fillRects = new Map();
+    const SVG_NS = "http://www.w3.org/2000/svg";
 
     function setupViewer(args) {
       const { dzi_url, overlays, height } = args;
@@ -50,26 +51,39 @@
         ajaxWithCredentials: true,
       });
 
-      const SVG_NS = "http://www.w3.org/2000/svg";
-
       viewer.addHandler("open", function() {
         for (const o of overlays) {
+          // SVG con dos rects superpuestos:
+          //   - fill rect (color de la clase predicha del slide, alpha=atención)
+          //   - stroke rect (borde del color de la clase predicha del PARCHE)
+          // Cada uno se enciende/apaga con su toggle.
           const svg = document.createElementNS(SVG_NS, "svg");
           svg.setAttribute("viewBox", "0 0 1 1");
           svg.setAttribute("preserveAspectRatio", "none");
-          svg.style.width = "100%";
-          svg.style.height = "100%";
-          svg.style.pointerEvents = "none";
 
-          const rect = document.createElementNS(SVG_NS, "rect");
-          rect.setAttribute("x", "0.015");
-          rect.setAttribute("y", "0.015");
-          rect.setAttribute("width", "0.97");
-          rect.setAttribute("height", "0.97");
-          rect.setAttribute("fill", "none");
-          rect.setAttribute("stroke", o.color);
-          rect.setAttribute("stroke-width", "0.025");
-          svg.appendChild(rect);
+          // Fill (atención)
+          const fillRect = document.createElementNS(SVG_NS, "rect");
+          fillRect.setAttribute("x", "0");
+          fillRect.setAttribute("y", "0");
+          fillRect.setAttribute("width", "1");
+          fillRect.setAttribute("height", "1");
+          fillRect.setAttribute("fill", o.att_fill || "transparent");
+          fillRect.setAttribute("stroke", "none");
+          fillRect.style.display = "none";
+          svg.appendChild(fillRect);
+          fillRects.set(o.idx, fillRect);
+
+          // Stroke (predicción)
+          const strokeRect = document.createElementNS(SVG_NS, "rect");
+          strokeRect.setAttribute("x", "0.015");
+          strokeRect.setAttribute("y", "0.015");
+          strokeRect.setAttribute("width", "0.97");
+          strokeRect.setAttribute("height", "0.97");
+          strokeRect.setAttribute("fill", "none");
+          strokeRect.setAttribute("stroke", o.color);
+          strokeRect.setAttribute("stroke-width", "0.025");
+          svg.appendChild(strokeRect);
+          strokeRects.set(o.idx, strokeRect);
 
           const div = document.createElement("div");
           div.className = "osd-patch";
@@ -83,11 +97,7 @@
 
           div.addEventListener("click", function(ev) {
             ev.stopPropagation();
-            lastClickIdx = o.idx;
-            lastClickTs = Date.now();
-            // El timestamp fuerza que cada click sea un valor distinto
-            // aunque sea el mismo parche, para que Streamlit detecte cambio.
-            Streamlit.setComponentValue({ idx: o.idx, ts: lastClickTs });
+            Streamlit.setComponentValue({ idx: o.idx, ts: Date.now() });
           });
 
           viewer.addOverlay({
@@ -95,16 +105,32 @@
             location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
           });
         }
+        applyToggles(window.__lastArgs || {});
       });
     }
 
-    function onRender(event) {
-      if (!initialized) {
-        setupViewer(event.detail.args);
-        initialized = true;
+    function applyToggles(args) {
+      const showPred = args.show_predictions !== false;   // default true
+      const showAtt = args.show_attention === true;       // default false
+      for (const r of strokeRects.values()) {
+        r.style.display = showPred ? "" : "none";
       }
-      // Reajustar height cada render por si Streamlit fuerza un resize.
-      Streamlit.setFrameHeight(event.detail.args.height + 10);
+      for (const r of fillRects.values()) {
+        r.style.display = showAtt ? "" : "none";
+      }
+    }
+
+    function onRender(event) {
+      const args = event.detail.args;
+      window.__lastArgs = args;
+      if (!initialized) {
+        setupViewer(args);
+        initialized = true;
+      } else {
+        // Solo cambian los toggles → no recreamos overlays
+        applyToggles(args);
+      }
+      Streamlit.setFrameHeight(args.height + 10);
     }
 
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);

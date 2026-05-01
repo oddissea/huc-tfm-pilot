@@ -440,6 +440,9 @@ def _render_openseadragon_viewer(
     pred_index: np.ndarray | None = None,
     patch_raw_size: int | None = None,
     attention: np.ndarray | None = None,
+    slide_pred_class: str = "CAR",
+    show_predictions: bool = True,
+    show_attention: bool = False,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
 ) -> dict | None:
@@ -464,6 +467,7 @@ def _render_openseadragon_viewer(
     # coords del WSI completo; el DZI stitched empieza en (y_min, x_min)).
     overlays_json = "[]"
     y_off, x_off = dzi_offset
+    sr, sg, sb = CLASS_COLORS_RGB.get(slide_pred_class, (0.5, 0.5, 0.5))
     if (positions is not None and pred_index is not None
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         att_arr = np.asarray(attention) if attention is not None else None
@@ -483,21 +487,107 @@ def _render_openseadragon_viewer(
             }
             if att_arr is not None:
                 a = float(att_arr[i])
+                rel = a / att_max if att_max > 0 else 0.0
                 item["att"] = round(a, 4)
-                item["att_rel"] = round(a / att_max, 3) if att_max > 0 else 0.0
+                item["att_rel"] = round(rel, 3)
+                # Color del slide-level con alpha=relative attention (max 0.85
+                # para no tapar el tejido por completo).
+                item["att_fill"] = (
+                    f"rgba({int(sr*255)},{int(sg*255)},{int(sb*255)},"
+                    f"{round(min(rel * 0.85, 0.85), 3)})"
+                )
             items.append(item)
         overlays_json = json.dumps(items)
 
-    # Renderiza el component custom de OpenSeadragon. Devuelve el último
-    # click sobre un parche para que el caller actualice el inspector.
-    from src.viz.osd_component import osd_viewer
-    overlays = json.loads(overlays_json)
-    return osd_viewer(
-        dzi_url=dzi_url,
-        overlays=overlays,
-        height=height,
-        key=f"osd_{job.job_id}",
-    )
+    # `data-show-pred` y `data-show-att` se interpolan al HTML para que
+    # el JS pinte/oculte cada layer. Cambiar los toggles en Streamlit
+    # dispara rerun y se reinterpola.
+    show_pred_js = "true" if show_predictions else "false"
+    show_att_js = "true" if show_attention else "false"
+
+    html = f"""
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+    <style>
+      .osd-patch {{ box-sizing: border-box; pointer-events: auto; }}
+      .osd-patch svg {{ display: block; width: 100%; height: 100%; pointer-events: none; }}
+    </style>
+    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+    <script>
+      const viewer = OpenSeadragon({{
+        id: "osd-{job.job_id}",
+        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
+        tileSources: "{dzi_url}",
+        background: "transparent",
+        showNavigator: true,
+        navigatorPosition: "BOTTOM_RIGHT",
+        navigatorHeight: 100,
+        navigatorWidth: 130,
+        gestureSettingsMouse: {{ scrollToZoom: true, clickToZoom: false }},
+        showRotationControl: false,
+        animationTime: 0.5,
+        immediateRender: true,
+        crossOriginPolicy: "Anonymous",
+        loadTilesWithAjax: true,
+        ajaxWithCredentials: true,
+      }});
+
+      const overlays = {overlays_json};
+      const SHOW_PRED = {show_pred_js};
+      const SHOW_ATT = {show_att_js};
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      viewer.addHandler("open", function() {{
+        for (const o of overlays) {{
+          const svg = document.createElementNS(SVG_NS, "svg");
+          svg.setAttribute("viewBox", "0 0 1 1");
+          svg.setAttribute("preserveAspectRatio", "none");
+
+          // Fill (atención): rect completo del color de la clase del slide,
+          // alpha proporcional a la atención (incluida en o.att_fill rgba).
+          if (SHOW_ATT && o.att_fill) {{
+            const fr = document.createElementNS(SVG_NS, "rect");
+            fr.setAttribute("x", "0"); fr.setAttribute("y", "0");
+            fr.setAttribute("width", "1"); fr.setAttribute("height", "1");
+            fr.setAttribute("fill", o.att_fill);
+            fr.setAttribute("stroke", "none");
+            svg.appendChild(fr);
+          }}
+
+          // Stroke (predicción): borde del color de la clase predicha del parche.
+          if (SHOW_PRED) {{
+            const sr = document.createElementNS(SVG_NS, "rect");
+            sr.setAttribute("x", "0.015"); sr.setAttribute("y", "0.015");
+            sr.setAttribute("width", "0.97"); sr.setAttribute("height", "0.97");
+            sr.setAttribute("fill", "none");
+            sr.setAttribute("stroke", o.color);
+            sr.setAttribute("stroke-width", "0.025");
+            svg.appendChild(sr);
+          }}
+
+          const div = document.createElement("div");
+          div.className = "osd-patch";
+          let tip = `#${{o.idx}} · ${{o.cls}}`;
+          if (o.att !== undefined) {{
+            const pct = (o.att_rel * 100).toFixed(0);
+            tip += ` · atención ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`;
+          }}
+          div.title = tip;
+          div.appendChild(svg);
+
+          viewer.addOverlay({{
+            element: div,
+            location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
+          }});
+        }}
+      }});
+    </script>
+    """
+    import streamlit.components.v1 as components
+    components.html(html, height=height + 20, scrolling=False)
+    # st.components.v1.html no devuelve eventos del cliente. Devolvemos un
+    # dict vacío para indicar "viewer renderizado, sin click capturable".
+    return {}
 
 
 def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
@@ -711,6 +801,7 @@ def _render_patch_predictions(
     patch_size: int | None = None,
     attention: np.ndarray | None = None,
     job: "Job | None" = None,
+    slide_pred_class: str = "CAR",
 ) -> None:
     """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
     + visor OpenSeadragon con overlay de bordes coloreados (si hay DZI) +
@@ -739,35 +830,47 @@ def _render_patch_predictions(
 
     if job is not None and job.dzi_path.exists():
         st.markdown(
-            "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
-            "azul CAR. Borde coloreado por la clase predicha del clasificador "
-            "F4 sobre cada parche; el tejido queda visible para zoom. "
-            "**Haz click sobre un parche para inspeccionarlo abajo.**"
+            "**Mapa del portaobjetos** — visor con tiles multi-resolución. "
+            "Activa las capas que necesites:"
         )
+        toggle_cols = st.columns([1, 1, 6])
+        with toggle_cols[0]:
+            show_pred = st.toggle(
+                "🟦 Predicciones",
+                value=True,
+                key=f"toggle_pred_{job_id}",
+                help="Borde coloreado por la clase predicha por F4 en cada parche.",
+            )
+        with toggle_cols[1]:
+            show_att = st.toggle(
+                "🔥 Atención",
+                value=False,
+                key=f"toggle_att_{job_id}",
+                help=(
+                    f"Relleno {slide_pred_class} con opacidad ∝ atención del "
+                    "AttnMIL — destaca los parches con mayor peso en la "
+                    "decisión slide-level."
+                ),
+            )
         osd_offset = (
             int(job.extra.get("dzi_y_min", 0)),
             int(job.extra.get("dzi_x_min", 0)),
         )
-        viewer_click = _render_openseadragon_viewer(
+        _render_openseadragon_viewer(
             job,
             positions=positions,
             pred_index=pred_index,
             patch_raw_size=patch_size,
             attention=attention,
+            slide_pred_class=slide_pred_class,
+            show_predictions=show_pred,
+            show_attention=show_att,
             dzi_offset=osd_offset,
         )
-        # Sincroniza el click del visor con el inspector. El timestamp evita
-        # que un click repetido sobre el mismo parche se ignore (Streamlit
-        # solo detecta cambio de valor).
-        last_ts_key = f"_osd_last_ts_{job_id}" if job_id else "_osd_last_ts"
-        if (viewer_click is not None and isinstance(viewer_click, dict)
-                and viewer_click.get("ts") != st.session_state.get(last_ts_key)):
-            st.session_state[last_ts_key] = viewer_click["ts"]
-            st.session_state[sel_key] = int(viewer_click["idx"])
         st.caption(
-            "Visor con tiles multi-resolución (OpenSeadragon). Pan con "
-            "arrastrar, zoom con rueda. Las áreas blancas son zonas que el "
-            "filtro de tejido descartó al parchear el portaobjetos."
+            "Pan con arrastrar, zoom con rueda. Las áreas blancas son zonas "
+            "que el filtro de tejido descartó al parchear el portaobjetos. "
+            "Pasa el ratón sobre un parche para ver índice + clase + atención."
         )
 
     if (positions is not None and patches_arr is not None
@@ -1117,63 +1220,12 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         return
     positions, categories = h5_meta
 
-    # Overlay tipo TFM: mosaico de los parches reales + capa coloreada
-    # según clase predicha, alpha proporcional a la atención normalizada.
-    # Se renderiza con Plotly para que el hover muestre #índice + atención
-    # (cruzable con los thumbnails del top-K) y para evitar el modal de
-    # pantalla completa de st.image.
-    n_patches = len(attention)
-    st.markdown(
-        f"**Mapa de atención sobre el slide** "
-        f"— color de la clase predicha ({pred_class}), "
-        f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
-        "ver el índice del parche."
-    )
-    # Selector de resolución del mosaico (radio horizontal, en su propia
-    # sección para que el patólogo pueda subir solo este mapa sin afectar
-    # el de predicciones por parche).
-    thumb_options = {"48 px": 48, "64 px": 64, "96 px": 96, "128 px": 128}
-    thumb_label = st.radio(
-        "Resolución del mapa de atención",
-        options=list(thumb_options.keys()),
-        index=0,
-        horizontal=True,
-        key=f"thumb_size_att_{job.job_id}",
-        help=(
-            "Tamaño de cada parche en el mosaico. Resolución alta = más "
-            "detalle al hacer zoom, pero más tiempo de render en slides "
-            "con muchos parches."
-        ),
-    )
-    thumb_size_att = thumb_options[thumb_label]
-
-    # Cargamos originals una sola vez para reusar luego en el mapa de
-    # predicciones por parche (sección de abajo).
+    # El antiguo mosaico Plotly del mapa de atención ya está cubierto por
+    # el toggle 'Atención' del visor OpenSeadragon de la sección de
+    # predicciones. Aquí solo cargamos los originals (necesarios para el
+    # top-K de parches y el inspector individual de abajo).
     originals = _load_all_originals(job)
     patches_arr, patch_size = originals if originals is not None else (None, None)
-
-    with st.spinner(
-        f"Generando overlay de atención ({n_patches} parches a {thumb_size_att} px)…"
-    ):
-        if patches_arr is not None and len(patches_arr) == len(attention):
-            fig_overlay = _attention_overlay_figure_cached(
-                job_id=job.job_id,
-                thumb_size=thumb_size_att,
-                opacity=0.85,
-                pred_class=pred_class,
-                _patches_arr=patches_arr,
-                _positions=positions,
-                _attention=attention,
-                patch_raw_size=patch_size,
-            )
-        else:
-            fig_overlay = None
-        if fig_overlay is not None:
-            st.plotly_chart(
-                fig_overlay,
-                use_container_width=True,
-                config={"displayModeBar": True, "scrollZoom": True},
-            )
 
     # Top-K parches por atención (debajo del overlay para contexto detallado)
     st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
@@ -1216,6 +1268,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 patch_size=originals_data[1] if originals_data[1] is not None else None,
                 attention=attention,
                 job=job,
+                slide_pred_class=pred_class,
             )
             if result.get("has_patch_gt"):
                 _render_patch_validation(patch_eval, result)
