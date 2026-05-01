@@ -113,7 +113,20 @@ with st.sidebar:
         st.success("Modelos cargados ✓")
     else:
         st.caption("Pulsa para descargar pesos desde GCS y cargar el ensemble.")
-        if st.button("Cargar modelos desde GCS", type="primary"):
+        # Placeholder para poder reemplazar el botón por la versión
+        # deshabilitada "⏳ Cargando…" durante la carga (~25 s). El CSS
+        # de `data-stale` no marca este botón con suficiente claridad.
+        btn_slot = st.empty()
+        clicked = btn_slot.button(
+            "Cargar modelos desde GCS", type="primary", key="btn_load_models",
+        )
+        if clicked:
+            btn_slot.button(
+                "⏳ Cargando…",
+                type="primary",
+                disabled=True,
+                key="btn_load_models_loading",
+            )
             progress = st.progress(0.0, text="Iniciando…")
 
             def _on_progress(done: int, total: int, msg: str) -> None:
@@ -123,6 +136,7 @@ with st.sidebar:
             with st.spinner("Descargando pesos y cargando modelos en GPU…"):
                 load_models(progress_cb=_on_progress)
             progress.empty()
+            btn_slot.empty()
             st.success(f"Cargados en {time.time() - t0:.1f} s")
             st.rerun()
 
