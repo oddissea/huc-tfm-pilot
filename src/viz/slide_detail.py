@@ -439,6 +439,7 @@ def _render_openseadragon_viewer(
     positions: np.ndarray | None = None,
     pred_index: np.ndarray | None = None,
     patch_raw_size: int | None = None,
+    attention: np.ndarray | None = None,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
 ) -> bool:
@@ -456,26 +457,33 @@ def _render_openseadragon_viewer(
         return False
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
-    # Construye el JSON con posiciones + clase de cada parche, restando
-    # el offset del DZI stitched (las posiciones del H5 están en coords
-    # del WSI completo; el DZI stitched empieza en (y_min, x_min)).
+    # Construye el JSON con posiciones + clase + atención de cada parche,
+    # restando el offset del DZI stitched (las posiciones del H5 están en
+    # coords del WSI completo; el DZI stitched empieza en (y_min, x_min)).
     overlays_json = "[]"
     y_off, x_off = dzi_offset
     if (positions is not None and pred_index is not None
             and patch_raw_size is not None and len(positions) == len(pred_index)):
+        att_arr = np.asarray(attention) if attention is not None else None
+        att_max = float(att_arr.max()) if (att_arr is not None and att_arr.size > 0) else 0.0
         items = []
         for i, (pos, p) in enumerate(zip(positions, pred_index)):
             cls = CLASS_NAMES[int(p)]
             r, g, b = CLASS_COLORS_RGB[cls]
             color = f"rgb({int(r*255)},{int(g*255)},{int(b*255)})"
-            items.append({
+            item = {
                 "x": int(pos[1]) - int(x_off),
                 "y": int(pos[0]) - int(y_off),
                 "size": int(patch_raw_size),
                 "color": color,
                 "idx": i,
                 "cls": cls,
-            })
+            }
+            if att_arr is not None:
+                a = float(att_arr[i])
+                item["att"] = round(a, 4)
+                item["att_rel"] = round(a / att_max, 3) if att_max > 0 else 0.0
+            items.append(item)
         overlays_json = json.dumps(items)
 
     html = f"""
@@ -483,7 +491,8 @@ def _render_openseadragon_viewer(
     <style>
       .osd-patch {{
         box-sizing: border-box;
-        pointer-events: none;
+        pointer-events: auto;     /* Captura hover para mostrar el title */
+        cursor: help;
       }}
     </style>
     <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
@@ -538,7 +547,14 @@ def _render_openseadragon_viewer(
 
           const div = document.createElement("div");
           div.className = "osd-patch";
-          div.title = `#${{o.idx}} · ${{o.cls}}`;
+          // Tooltip nativo del browser. Si hay atención del AttnMIL, se
+          // añade absoluta + porcentaje del máximo del slide.
+          let tip = `#${{o.idx}} · ${{o.cls}}`;
+          if (o.att !== undefined) {{
+            const pct = (o.att_rel * 100).toFixed(0);
+            tip += ` · atención ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`;
+          }}
+          div.title = tip;
           div.appendChild(svg);
 
           viewer.addOverlay({{
@@ -803,6 +819,7 @@ def _render_patch_predictions(
             positions=positions,
             pred_index=pred_index,
             patch_raw_size=patch_size,
+            attention=attention,
             dzi_offset=osd_offset,
         )
         st.caption(
