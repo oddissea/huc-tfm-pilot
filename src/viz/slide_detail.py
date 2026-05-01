@@ -442,19 +442,21 @@ def _render_openseadragon_viewer(
     attention: np.ndarray | None = None,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
-) -> bool:
-    """Si el job tiene `slide.dzi` (sólo TIFFs), embebe un visor OpenSeadragon
-    apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones + predicciones,
-    dibuja un overlay HTML con un rectángulo del color de la clase predicha
-    sobre cada parche en sus coordenadas reales del WSI. Devuelve True si se
-    renderizó.
+) -> dict | None:
+    """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
+    apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
+    predicciones, dibuja un overlay SVG con un rectángulo del color de la
+    clase predicha sobre cada parche en sus coordenadas del WSI stitched.
 
-    nginx sirve el directorio `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
+    Devuelve el último click sobre un parche en formato `{"idx", "ts"}` o
+    None si nunca se hizo click (o si no hay DZI).
+
+    nginx sirve `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
     (ver `nginx.conf` location /dzi/). El navegador hereda BasicAuth
     same-origin para los tiles.
     """
     if not job.dzi_path.exists():
-        return False
+        return None
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
     # Construye el JSON con posiciones + clase + atención de cada parche,
@@ -486,89 +488,16 @@ def _render_openseadragon_viewer(
             items.append(item)
         overlays_json = json.dumps(items)
 
-    html = f"""
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
-    <style>
-      .osd-patch {{
-        box-sizing: border-box;
-        pointer-events: auto;     /* Captura hover para mostrar el title */
-      }}
-    </style>
-    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
-    <script>
-      const viewer = OpenSeadragon({{
-        id: "osd-{job.job_id}",
-        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
-        tileSources: "{dzi_url}",
-        background: "transparent",
-        showNavigator: true,
-        navigatorPosition: "BOTTOM_RIGHT",
-        navigatorHeight: 100,
-        navigatorWidth: 130,
-        gestureSettingsMouse: {{ scrollToZoom: true, clickToZoom: false }},
-        showRotationControl: false,
-        animationTime: 0.5,
-        immediateRender: true,
-        crossOriginPolicy: "Anonymous",
-        loadTilesWithAjax: true,
-        ajaxWithCredentials: true,
-      }});
-
-      const overlays = {overlays_json};
-      const SVG_NS = "http://www.w3.org/2000/svg";
-
-      viewer.addHandler("open", function() {{
-        for (const o of overlays) {{
-          // SVG con viewBox 0..1 + stroke-width relativo (8% del lado del
-          // parche). Al hacer zoom el SVG escala con el overlay, así el
-          // borde se mantiene visualmente proporcional al parche en
-          // cualquier nivel de zoom — a vista lejana queda como un pequeño
-          // marquito con interior transparente, no como un relleno.
-          const svg = document.createElementNS(SVG_NS, "svg");
-          svg.setAttribute("viewBox", "0 0 1 1");
-          svg.setAttribute("preserveAspectRatio", "none");
-          svg.style.width = "100%";
-          svg.style.height = "100%";
-          svg.style.pointerEvents = "none";
-
-          const rect = document.createElementNS(SVG_NS, "rect");
-          // Inset mínimo (1.5 % cada lado) para que el borde quede casi
-          // pegado al parche pero sin que strokes adyacentes se toquen.
-          rect.setAttribute("x", "0.015");
-          rect.setAttribute("y", "0.015");
-          rect.setAttribute("width", "0.97");
-          rect.setAttribute("height", "0.97");
-          rect.setAttribute("fill", "none");
-          rect.setAttribute("stroke", o.color);
-          rect.setAttribute("stroke-width", "0.025");
-          svg.appendChild(rect);
-
-          const div = document.createElement("div");
-          div.className = "osd-patch";
-          // Tooltip nativo del browser. Si hay atención del AttnMIL, se
-          // añade absoluta + porcentaje del máximo del slide.
-          let tip = `#${{o.idx}} · ${{o.cls}}`;
-          if (o.att !== undefined) {{
-            const pct = (o.att_rel * 100).toFixed(0);
-            tip += ` · atención ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`;
-          }}
-          div.title = tip;
-          div.appendChild(svg);
-
-          viewer.addOverlay({{
-            element: div,
-            location: viewer.viewport.imageToViewportRectangle(
-              o.x, o.y, o.size, o.size
-            ),
-          }});
-        }}
-      }});
-    </script>
-    """
-    import streamlit.components.v1 as components
-    components.html(html, height=height + 20, scrolling=False)
-    return True
+    # Renderiza el component custom de OpenSeadragon. Devuelve el último
+    # click sobre un parche para que el caller actualice el inspector.
+    from src.viz.osd_component import osd_viewer
+    overlays = json.loads(overlays_json)
+    return osd_viewer(
+        dzi_url=dzi_url,
+        overlays=overlays,
+        height=height,
+        key=f"osd_{job.job_id}",
+    )
 
 
 def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
@@ -803,17 +732,23 @@ def _render_patch_predictions(
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
 
     # Mapa de predicciones por parche (visor OpenSeadragon con overlays SVG)
+    n = len(pred_index)
+    sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
+    if sel_key not in st.session_state:
+        st.session_state[sel_key] = -1
+
     if job is not None and job.dzi_path.exists():
         st.markdown(
             "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
             "azul CAR. Borde coloreado por la clase predicha del clasificador "
-            "F4 sobre cada parche; el tejido queda visible para zoom."
+            "F4 sobre cada parche; el tejido queda visible para zoom. "
+            "**Haz click sobre un parche para inspeccionarlo abajo.**"
         )
         osd_offset = (
             int(job.extra.get("dzi_y_min", 0)),
             int(job.extra.get("dzi_x_min", 0)),
         )
-        _render_openseadragon_viewer(
+        viewer_click = _render_openseadragon_viewer(
             job,
             positions=positions,
             pred_index=pred_index,
@@ -821,6 +756,14 @@ def _render_patch_predictions(
             attention=attention,
             dzi_offset=osd_offset,
         )
+        # Sincroniza el click del visor con el inspector. El timestamp evita
+        # que un click repetido sobre el mismo parche se ignore (Streamlit
+        # solo detecta cambio de valor).
+        last_ts_key = f"_osd_last_ts_{job_id}" if job_id else "_osd_last_ts"
+        if (viewer_click is not None and isinstance(viewer_click, dict)
+                and viewer_click.get("ts") != st.session_state.get(last_ts_key)):
+            st.session_state[last_ts_key] = viewer_click["ts"]
+            st.session_state[sel_key] = int(viewer_click["idx"])
         st.caption(
             "Visor con tiles multi-resolución (OpenSeadragon). Pan con "
             "arrastrar, zoom con rueda. Las áreas blancas son zonas que el "
@@ -829,10 +772,6 @@ def _render_patch_predictions(
 
     if (positions is not None and patches_arr is not None
             and patch_size is not None and len(patches_arr) == len(pred_index)):
-        n = len(pred_index)
-        sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
-        if sel_key not in st.session_state:
-            st.session_state[sel_key] = -1
 
         @st.fragment
         def _render_inspector():

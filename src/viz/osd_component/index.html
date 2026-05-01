@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+    #viewer { width: 100%; background: transparent; border-radius: 6px; }
+    .osd-patch {
+      box-sizing: border-box;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+  <script>
+    // Streamlit component bridge.
+    // Streamlit inyecta un objeto global window.Streamlit con eventos
+    // RENDER_EVENT y métodos setComponentReady, setFrameHeight, setComponentValue.
+
+    let viewer = null;
+    let initialized = false;
+    let lastClickIdx = null;
+    let lastClickTs = null;
+
+    function setupViewer(args) {
+      const { dzi_url, overlays, height } = args;
+      document.getElementById("viewer").style.height = `${height}px`;
+      Streamlit.setFrameHeight(height + 10);
+
+      viewer = OpenSeadragon({
+        id: "viewer",
+        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
+        tileSources: dzi_url,
+        background: "transparent",
+        showNavigator: true,
+        navigatorPosition: "BOTTOM_RIGHT",
+        navigatorHeight: 100,
+        navigatorWidth: 130,
+        gestureSettingsMouse: { scrollToZoom: true, clickToZoom: false },
+        showRotationControl: false,
+        animationTime: 0.5,
+        immediateRender: true,
+        crossOriginPolicy: "Anonymous",
+        loadTilesWithAjax: true,
+        ajaxWithCredentials: true,
+      });
+
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      viewer.addHandler("open", function() {
+        for (const o of overlays) {
+          const svg = document.createElementNS(SVG_NS, "svg");
+          svg.setAttribute("viewBox", "0 0 1 1");
+          svg.setAttribute("preserveAspectRatio", "none");
+          svg.style.width = "100%";
+          svg.style.height = "100%";
+          svg.style.pointerEvents = "none";
+
+          const rect = document.createElementNS(SVG_NS, "rect");
+          rect.setAttribute("x", "0.015");
+          rect.setAttribute("y", "0.015");
+          rect.setAttribute("width", "0.97");
+          rect.setAttribute("height", "0.97");
+          rect.setAttribute("fill", "none");
+          rect.setAttribute("stroke", o.color);
+          rect.setAttribute("stroke-width", "0.025");
+          svg.appendChild(rect);
+
+          const div = document.createElement("div");
+          div.className = "osd-patch";
+          let tip = `#${o.idx} · ${o.cls}`;
+          if (o.att !== undefined) {
+            const pct = (o.att_rel * 100).toFixed(0);
+            tip += ` · atención ${o.att.toFixed(4)} (${pct}% del máximo)`;
+          }
+          div.title = tip;
+          div.appendChild(svg);
+
+          div.addEventListener("click", function(ev) {
+            ev.stopPropagation();
+            lastClickIdx = o.idx;
+            lastClickTs = Date.now();
+            // El timestamp fuerza que cada click sea un valor distinto
+            // aunque sea el mismo parche, para que Streamlit detecte cambio.
+            Streamlit.setComponentValue({ idx: o.idx, ts: lastClickTs });
+          });
+
+          viewer.addOverlay({
+            element: div,
+            location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
+          });
+        }
+      });
+    }
+
+    function onRender(event) {
+      if (!initialized) {
+        setupViewer(event.detail.args);
+        initialized = true;
+      }
+      // Reajustar height cada render por si Streamlit fuerza un resize.
+      Streamlit.setFrameHeight(event.detail.args.height + 10);
+    }
+
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+    Streamlit.setComponentReady();
+  </script>
+</body>
+</html>
