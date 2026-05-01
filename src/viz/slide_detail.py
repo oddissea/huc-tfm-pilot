@@ -492,7 +492,6 @@ def _render_openseadragon_viewer(
       .osd-patch {{
         box-sizing: border-box;
         pointer-events: auto;     /* Captura hover para mostrar el title */
-        cursor: help;
       }}
     </style>
     <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
