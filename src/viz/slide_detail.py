@@ -431,8 +431,7 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
         text=text,
         texttemplate="%{text}",
         hovertemplate="real=%{y} · predicho=%{x}<br>%{text}<extra></extra>",
-        showscale=True,
-        colorbar=dict(title="% por<br>columna", thickness=12, len=0.7, tickformat=".0%"),
+        showscale=False,
     ))
     fig.update_layout(
         title="Matriz de confusión a nivel de parche (filas: real, columnas: predicho)",
