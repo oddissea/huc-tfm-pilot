@@ -450,6 +450,7 @@ def _patch_predictions_bars(pred_index: np.ndarray) -> go.Figure:
     pcts = counts / max(n, 1)
     text = [f"<b>{int(c)}</b> ({p:.1%})" for c, p in zip(counts, pcts)]
     colors = [CLASS_COLORS[c] for c in CLASS_NAMES]
+    y_max = int(counts.max()) if counts.size else 1
     fig = go.Figure(go.Bar(
         x=list(CLASS_NAMES),
         y=counts,
@@ -462,8 +463,12 @@ def _patch_predictions_bars(pred_index: np.ndarray) -> go.Figure:
     fig.update_layout(
         title=f"Distribución de predicciones del clasificador F4 sobre los {n} parches",
         xaxis=dict(title=""),
-        yaxis=dict(title="parches", rangemode="tozero"),
-        height=300,
+        yaxis=dict(
+            title="parches",
+            range=[0, y_max * 1.18],   # holgura para que el texto "outside" no se corte
+        ),
+        bargap=0.55,                   # barras más estrechas (≈45 % del slot)
+        height=320,
         margin=dict(l=10, r=10, t=50, b=20),
         showlegend=False,
     )
