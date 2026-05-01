@@ -434,6 +434,45 @@ def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float | int]]:
     return out
 
 
+def _render_openseadragon_viewer(job: "Job", height: int = 620) -> bool:
+    """Si el job tiene `slide.dzi` (sólo TIFFs), embebe un visor OpenSeadragon
+    apuntando a `/dzi/<job_id>/slide.dzi`. Devuelve True si se renderizó.
+
+    nginx sirve el directorio `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
+    (ver `nginx.conf` location /dzi/). El navegador hereda BasicAuth
+    same-origin para los tiles.
+    """
+    if not job.dzi_path.exists():
+        return False
+    dzi_url = f"/dzi/{job.job_id}/slide.dzi"
+    html = f"""
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:#222;border-radius:6px;"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+    <script>
+      OpenSeadragon({{
+        id: "osd-{job.job_id}",
+        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
+        tileSources: "{dzi_url}",
+        showNavigator: true,
+        navigatorPosition: "BOTTOM_RIGHT",
+        navigatorHeight: 100,
+        navigatorWidth: 130,
+        gestureSettingsMouse: {{ scrollToZoom: true, clickToZoom: false }},
+        showRotationControl: false,
+        animationTime: 0.5,
+        immediateRender: true,
+        crossOriginPolicy: "Anonymous",
+        loadTilesWithAjax: true,
+        ajaxWithCredentials: true,
+      }});
+    </script>
+    """
+    import streamlit.components.v1 as components
+    components.html(html, height=height + 20, scrolling=False)
+    return True
+
+
 def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
     """Heatmap 3x3 de la matriz de confusión.
 
@@ -1057,6 +1096,17 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         st.plotly_chart(
             _confidence_gauge(max_prob, pred_class),
             use_container_width=True,
+        )
+
+    # ─── Visor WSI profesional (OpenSeadragon) si hay DZI ───────────────────
+    # Solo se genera DZI cuando se sube un TIFF original (los H5 ya parcheados
+    # no tienen WSI completo). Si existe, lo mostramos antes de los mosaicos
+    # de atención/predicciones para que sea la primera vista del patólogo.
+    if _render_openseadragon_viewer(job):
+        st.caption(
+            "Visor profesional con tiles multi-resolución (OpenSeadragon). "
+            "Pan con arrastrar, zoom con rueda. Los mosaicos coloreados de "
+            "atención y predicciones siguen disponibles más abajo."
         )
 
     # ─── Atención: requiere attention.npy + positions del H5 ────────────────

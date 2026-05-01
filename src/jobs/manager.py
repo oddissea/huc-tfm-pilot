@@ -90,6 +90,13 @@ class Job:
         """Path del .npz con GT + predicciones por parche (solo si hay GT)."""
         return self.job_dir / "patch_eval.npz"
 
+    @property
+    def dzi_path(self) -> Path:
+        """Path del fichero DZI principal (XML) generado por pyvips a partir
+        del TIFF para el visor OpenSeadragon. Solo existe si input_type=tiff
+        — los H5 ya parcheados no tienen TIFF original que tilear."""
+        return self.job_dir / "slide.dzi"
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["status"] = self.status.value

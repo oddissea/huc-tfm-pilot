@@ -62,14 +62,29 @@ def _do_preprocess(manager: JobManager, job: Job) -> None:
             t0 = time.time()
             n_patches = convert_tiff_to_h5(job.raw_path, job.h5_path)
             conversion_seconds = time.time() - t0
-            manager.update_status(
-                job.job_id,
-                JobStatus.CONVERTED,
-                extra={
-                    "n_patches": n_patches,
-                    "conversion_seconds": round(conversion_seconds, 2),
-                },
-            )
+
+            # Genera tiles DZI desde el TIFF para el visor OpenSeadragon.
+            # Best effort: si falla (libvips no disponible, TIFF corrupto),
+            # seguimos con la inferencia — el viewer pro queda ausente pero
+            # el resto del flujo funciona.
+            extra = {
+                "n_patches": n_patches,
+                "conversion_seconds": round(conversion_seconds, 2),
+            }
+            try:
+                from src.preprocessing.dzi import generate_dzi
+                t1 = time.time()
+                generate_dzi(job.raw_path, job.job_dir, basename="slide")
+                extra["dzi_seconds"] = round(time.time() - t1, 2)
+                extra["has_dzi"] = True
+                logger.info("DZI generado para %s en %.1fs", job.short_id, extra["dzi_seconds"])
+            except Exception as dzi_e:
+                logger.warning(
+                    "Job %s: DZI generation falló (%s) — continúo sin viewer pro",
+                    job.short_id, dzi_e,
+                )
+
+            manager.update_status(job.job_id, JobStatus.CONVERTED, extra=extra)
             manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
 
         elif job.input_type == "h5":

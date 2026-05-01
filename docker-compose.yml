@@ -33,6 +33,10 @@ services:
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
+      # Volumen compartido con el app container: queue/<job_id>/dzi/...
+      # contiene los tiles DZI generados por el worker para el visor
+      # OpenSeadragon. nginx los sirve como static (location /dzi/).
+      - ./queue:/var/www/dzi:ro
     depends_on:
       - app
     restart: unless-stopped
