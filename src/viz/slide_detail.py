@@ -497,8 +497,11 @@ def _patch_predictions_overlay(
     """Mosaico de los parches reales con un **borde coloreado** por la clase
     predicha de cada parche (verde=NOR, naranja=ADE, azul=CAR). El tejido
     queda visible al 100 %, sin opacity blending, para que el patólogo pueda
-    hacer zoom y comprobar el contenido de cada parche. Intensidad uniforme:
-    no se modula por atención (esa info está en el otro mapa).
+    hacer zoom y comprobar el contenido de cada parche.
+
+    Entre parches dejamos un hueco blanco (`gap`) para que los bordes de
+    parches adyacentes con clases distintas NO se toquen pixel a pixel y
+    cada parche se lea como una "tarjeta" independiente.
     """
     pos = np.asarray(positions, dtype=np.int64)
     n = len(pos)
@@ -511,18 +514,25 @@ def _patch_predictions_overlay(
     n_rows = int(rows.max()) + 1
     n_cols = int(cols.max()) + 1
     s = thumb_size
+    gap = max(2, thumb_size // 16)        # 2 px @ 48, 8 px @ 128
+    inner = s - 2 * gap
 
     canvas = np.full((n_rows * s, n_cols * s, 3), 255, dtype=np.uint8)
     for i in range(n):
         r, c = int(rows[i]), int(cols[i])
-        thumb = cv2.resize(patches_orig[i], (s, s), interpolation=cv2.INTER_AREA)
-        canvas[r * s:(r + 1) * s, c * s:(c + 1) * s] = thumb
+        # Thumb más pequeño centrado dentro de la celda, dejando `gap` blanco a
+        # los lados. El borde se pinta sobre el thumb shrunken.
+        thumb = cv2.resize(
+            patches_orig[i], (inner, inner), interpolation=cv2.INTER_AREA,
+        )
+        y0, x0 = r * s + gap, c * s + gap
+        canvas[y0:y0 + inner, x0:x0 + inner] = thumb
         cls = CLASS_NAMES[int(pred_index[i])]
         color_rgb = tuple(int(v * 255) for v in CLASS_COLORS_RGB[cls])
         cv2.rectangle(
             canvas,
-            (c * s, r * s),
-            ((c + 1) * s - 1, (r + 1) * s - 1),
+            (x0, y0),
+            (x0 + inner - 1, y0 + inner - 1),
             color_rgb,
             thickness=border_thickness,
         )
