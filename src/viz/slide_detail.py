@@ -443,6 +443,52 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
     return fig
 
 
+def _patch_predictions_bars(pred_index: np.ndarray) -> go.Figure:
+    """Bar chart con la distribución de clases predichas por parche."""
+    n = len(pred_index)
+    counts = np.bincount(pred_index, minlength=len(CLASS_NAMES))
+    pcts = counts / max(n, 1)
+    text = [f"<b>{int(c)}</b> ({p:.1%})" for c, p in zip(counts, pcts)]
+    colors = [CLASS_COLORS[c] for c in CLASS_NAMES]
+    fig = go.Figure(go.Bar(
+        x=list(CLASS_NAMES),
+        y=counts,
+        marker=dict(color=colors),
+        text=text,
+        textposition="outside",
+        hovertemplate="%{x}: %{y} parches (%{customdata:.1%})<extra></extra>",
+        customdata=pcts,
+    ))
+    fig.update_layout(
+        title=f"Distribución de predicciones del clasificador F4 sobre los {n} parches",
+        xaxis=dict(title=""),
+        yaxis=dict(title="parches", rangemode="tozero"),
+        height=300,
+        margin=dict(l=10, r=10, t=50, b=20),
+        showlegend=False,
+    )
+    return fig
+
+
+def _render_patch_predictions(patch_eval: dict) -> None:
+    """Sección 'Predicciones por parche' (sin GT). Siempre disponible si el
+    worker dejó patch_eval.npz."""
+    pred_index = np.asarray(patch_eval.get("pred_index"), dtype=np.int64)
+    if pred_index.size == 0:
+        return
+    st.divider()
+    st.subheader("Predicciones a nivel de parche")
+    st.caption(
+        "Distribución de la salida del clasificador F4 (no del AttnMIL) sobre "
+        "cada parche del portaobjetos. Refleja la heterogeneidad interna del "
+        "tejido independientemente del veredicto agregado a nivel de slide. "
+        "El AttnMIL puede asignar más peso a una minoría de parches y por "
+        "eso la predicción slide-level no tiene por qué coincidir con la "
+        "clase mayoritaria de las barras."
+    )
+    st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
+
+
 def _render_patch_validation(patch_eval: dict, result: dict) -> None:
     """Sección 'Validación a nivel de parche' bajo el detalle del slide.
 
@@ -732,14 +778,15 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             use_container_width=True,
         )
 
-    # Validación patch-level (matriz confusión + métricas). Slot fijo
-    # con st.empty() para que Streamlit reconcilie limpiamente al cambiar
-    # de slide: el hueco siempre existe; sólo se llena cuando el H5
-    # trae patch_categories útiles.
-    patch_validation_slot = st.empty()
-    if result.get("has_patch_gt"):
-        with patch_validation_slot.container():
-            with st.spinner("Construyendo matriz de confusión patch-level…"):
-                patch_eval = _load_patch_eval(job)
-                if patch_eval is not None:
+    # Predicciones por parche del clasificador F4: distribución siempre
+    # disponible, validación con matriz de confusión solo si el H5 trae GT.
+    # Slot fijo con st.empty() para que Streamlit reconcilie limpio al
+    # cambiar de slide.
+    patch_section_slot = st.empty()
+    patch_eval = _load_patch_eval(job)
+    if patch_eval is not None:
+        with patch_section_slot.container():
+            with st.spinner("Cargando predicciones a nivel de parche…"):
+                _render_patch_predictions(patch_eval)
+                if result.get("has_patch_gt"):
                     _render_patch_validation(patch_eval, result)

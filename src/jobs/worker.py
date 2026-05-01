@@ -129,39 +129,45 @@ def _do_inference(manager: JobManager, job: Job) -> None:
         if result.attention_weights_mean is not None:
             np.save(job.attention_path, result.attention_weights_mean.numpy())
 
-        # GT + predicciones patch-level: solo si el H5 trae etiquetas útiles
-        # (no todo XXX). Mapeamos TUM→CAR y excluimos HIP/ART del cómputo.
-        if h5.has_patch_gt and result.patch_predictions is not None:
-            cats_raw = h5.patch_categories                        # (N,) str
-            cats_ternary = np.array([
-                RAW_TO_TERNARY.get(c, "EXCLUDED") for c in cats_raw
-            ])
-            valid_mask = cats_ternary != "EXCLUDED"
-            class_to_idx = {c: i for i, c in enumerate(CLASS_NAMES)}
-            gt_idx_full = np.array([
-                class_to_idx[c] if c in class_to_idx else -1 for c in cats_ternary
-            ], dtype=np.int64)
-
-            np.savez(
-                job.patch_eval_path,
-                cats_raw=cats_raw,
-                cats_ternary=cats_ternary,
-                valid_mask=valid_mask,
-                gt_index=gt_idx_full,
-                pred_index=result.patch_predictions.numpy().astype(np.int64),
-                pred_probs=result.patch_probs.numpy().astype(np.float32),
-            )
-            n_valid = int(valid_mask.sum())
-            n_excluded = int((~valid_mask).sum())
-            result_dict["patch_eval"] = {
-                "n_valid": n_valid,
-                "n_excluded": n_excluded,
-                "excluded_breakdown": {
-                    c: int((cats_raw == c).sum())
-                    for c in EXCLUDED_RAW
-                    if (cats_raw == c).any()
-                },
+        # Predicciones patch-level del clasificador F4: SIEMPRE se guardan
+        # (independientemente de la GT) para que la UI pueda mostrar la
+        # distribución de clases predichas por parche aunque el H5 no traiga
+        # etiquetas. Si además hay GT (has_patch_gt=True), añadimos los
+        # campos cats_raw/cats_ternary/valid_mask/gt_index para activar la
+        # sección de validación con matriz de confusión.
+        if result.patch_predictions is not None:
+            npz_payload: dict = {
+                "pred_index": result.patch_predictions.numpy().astype(np.int64),
+                "pred_probs": result.patch_probs.numpy().astype(np.float32),
             }
+            if h5.has_patch_gt:
+                cats_raw = h5.patch_categories                       # (N,) str
+                cats_ternary = np.array([
+                    RAW_TO_TERNARY.get(c, "EXCLUDED") for c in cats_raw
+                ])
+                valid_mask = cats_ternary != "EXCLUDED"
+                class_to_idx = {c: i for i, c in enumerate(CLASS_NAMES)}
+                gt_idx_full = np.array([
+                    class_to_idx[c] if c in class_to_idx else -1 for c in cats_ternary
+                ], dtype=np.int64)
+                npz_payload.update(
+                    cats_raw=cats_raw,
+                    cats_ternary=cats_ternary,
+                    valid_mask=valid_mask,
+                    gt_index=gt_idx_full,
+                )
+                n_valid = int(valid_mask.sum())
+                n_excluded = int((~valid_mask).sum())
+                result_dict["patch_eval"] = {
+                    "n_valid": n_valid,
+                    "n_excluded": n_excluded,
+                    "excluded_breakdown": {
+                        c: int((cats_raw == c).sum())
+                        for c in EXCLUDED_RAW
+                        if (cats_raw == c).any()
+                    },
+                }
+            np.savez(job.patch_eval_path, **npz_payload)
 
         with open(job.result_path, "w") as f:
             json.dump(result_dict, f, indent=2)
