@@ -809,8 +809,15 @@ def _render_patch_predictions(
                 if probs_str:
                     st.caption(f"Probabilidades F4: {probs_str}")
                 if att_val is not None:
-                    rel_text = f" ({att_rel:.0%} del máximo del slide)" if att_rel is not None else ""
-                    st.metric("Atención AttnMIL", f"{att_val:.4f}{rel_text}")
+                    delta_text = (
+                        f"{att_rel:.0%} del máximo" if att_rel is not None else None
+                    )
+                    st.metric(
+                        "Atención AttnMIL",
+                        f"{att_val:.4f}",
+                        delta=delta_text,
+                        delta_color="off",
+                    )
                 if gt_label is not None:
                     st.metric("GT (etiqueta del H5)", gt_label)
                 pos_y, pos_x = int(positions[idx][0]), int(positions[idx][1])
