@@ -544,10 +544,12 @@ def _render_openseadragon_viewer(
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
-        // Permite hacer zoom hasta 4× más allá de la resolución nativa de
+        // Permite hacer zoom hasta 5× más allá de la resolución nativa de
         // los tiles (por defecto 1.1x). El patólogo puede inspeccionar
         // morfología fina sin necesidad del panel del inspector aparte.
-        maxZoomPixelRatio: 4,
+        // No tiene coste server-side: solo escala client-side (más allá
+        // se ve pixelado, pero útil para verificar bordes y formas).
+        maxZoomPixelRatio: 5,
       }});
 
       const overlays = {overlays_json};
