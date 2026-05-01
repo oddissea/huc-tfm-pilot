@@ -4,8 +4,10 @@ Uso típico:
 
     bundle = load_f4(...)
     attnmil_ensemble = load_attnmil_ensemble(...)
-    patches = tensor de forma (N, 3, 224, 224) — original o (N, 2, 3, 224, 224) si dual
-    out = predict_slide(bundle, attnmil_ensemble, patches, mode="ensemble_25")
+    # patches: arrays uint8 (N, H, W, 3) — la conversión + resize se hace
+    # por batch en GPU para no agotar RAM en slides grandes (ca_1534 = 3.177).
+    out = predict_slide(bundle, attnmil_ensemble, patches_orig, patches_reb,
+                        mode="ensemble_25")
 """
 
 from __future__ import annotations
@@ -14,10 +16,13 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
 from src.inference.model import AttnMILBundle, F4Bundle, CLASS_NAMES
+
+TARGET_HW = 224
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +44,48 @@ class SlideResult:
     patch_predictions: torch.Tensor | None = None # (N,) argmax de patch_probs (idx 0..2)
 
 
+def _to_model_tensor(
+    chunk_uint8: np.ndarray,
+    device: torch.device,
+    target_hw: int = TARGET_HW,
+) -> torch.Tensor:
+    """(B, H, W, 3) uint8 → (B, 3, target_hw, target_hw) float32 [0,1] en device.
+
+    La conversión + resize se hace por batch en lugar de pre-procesar el slide
+    entero: un slide de 3.177 parches en float32 a 300×300 picaba ~12 GB de RAM
+    (OOM en `g2-standard-4`). Con conversión por batch el pico se queda bajo.
+    """
+    if chunk_uint8.dtype != np.uint8:
+        raise ValueError(f"Esperaba uint8, recibí {chunk_uint8.dtype}")
+    if chunk_uint8.ndim != 4 or chunk_uint8.shape[-1] != 3:
+        raise ValueError(f"Shape inesperado: {chunk_uint8.shape}, esperaba (B,H,W,3)")
+
+    t = torch.from_numpy(chunk_uint8).permute(0, 3, 1, 2).float() / 255.0
+    h, w = t.shape[-2:]
+    if (h, w) != (target_hw, target_hw):
+        t = F.interpolate(
+            t,
+            size=(target_hw, target_hw),
+            mode="bilinear",
+            align_corners=False,
+            antialias=True,
+        )
+    return t.contiguous().to(device, non_blocking=True)
+
+
 def _f4_forward_to_features(
     f4: F4Bundle,
-    patches_orig: torch.Tensor,
-    patches_reb: torch.Tensor,
+    patches_orig: np.ndarray,
+    patches_reb: np.ndarray,
     batch_size: int = 64,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pasa los parches por F4 y devuelve features 512-d + logits ternarios por parche.
 
     Args:
         f4: bundle del F4 cargado
-        patches_orig: tensor (N, 3, 224, 224) ya normalizado, parches originales
-        patches_reb:  tensor (N, 3, 224, 224) ya normalizado, parches rebinneados
-        batch_size: tamaño de batch para inferencia
+        patches_orig: np.ndarray (N, H, W, 3) uint8 — parches originales sin convertir
+        patches_reb:  np.ndarray (N, H, W, 3) uint8 — parches rebinneados sin convertir
+        batch_size: tamaño de batch para inferencia (también limita el pico de RAM)
 
     Returns:
         - features 512-d (N, 512) post-ReLU del classifier (input del AttnMIL)
@@ -68,8 +102,8 @@ def _f4_forward_to_features(
     with torch.inference_mode():
         for start in range(0, n, batch_size):
             end = min(start + batch_size, n)
-            x_orig = patches_orig[start:end].to(device, non_blocking=True)
-            x_reb = patches_reb[start:end].to(device, non_blocking=True)
+            x_orig = _to_model_tensor(patches_orig[start:end], device)
+            x_reb = _to_model_tensor(patches_reb[start:end], device)
 
             embeddings_4096 = f4.encoder((x_orig, x_reb))   # (B, 4096)
             hidden_pre_relu = classifier_hidden(embeddings_4096)  # (B, 512)
@@ -104,8 +138,8 @@ def _select_attnmil_models(
 def predict_slide(
     f4: F4Bundle,
     ensemble: list[AttnMILBundle],
-    patches_orig: torch.Tensor,
-    patches_reb: torch.Tensor,
+    patches_orig: np.ndarray,
+    patches_reb: np.ndarray,
     mode: InferenceMode = "ensemble_25",
     seed: int | None = None,
     fold: int | None = None,
@@ -116,8 +150,8 @@ def predict_slide(
     Args:
         f4: bundle del modelo F4 cargado
         ensemble: lista de AttnMILBundle (puede tener 1, 5 o 25 elementos en este caso)
-        patches_orig: (N, 3, 224, 224)
-        patches_reb:  (N, 3, 224, 224)
+        patches_orig: np.ndarray (N, H, W, 3) uint8 — sin convertir
+        patches_reb:  np.ndarray (N, H, W, 3) uint8 — sin convertir
         mode: "single" | "single_seed" | "ensemble_25"
         seed, fold: requeridos para los modos no-ensemble
         return_attention: si True, devuelve además los pesos medios de atención
@@ -176,12 +210,12 @@ def predict_synthetic(
     n_patches: int = 50,
     mode: InferenceMode = "ensemble_25",
 ) -> SlideResult:
-    """Smoke test: genera parches aleatorios normalizados como ImageNet y predice.
+    """Smoke test: genera parches uint8 aleatorios y predice.
 
     No tiene sentido clínico, sirve solo para validar que el pipeline (F4 →
     features 512-d → AttnMIL → softmax) está cableado correctamente.
     """
-    device = f4.device
-    patches_orig = torch.randn(n_patches, 3, 224, 224, device="cpu")
-    patches_reb = torch.randn(n_patches, 3, 224, 224, device="cpu")
+    rng = np.random.default_rng(0)
+    patches_orig = rng.integers(0, 256, size=(n_patches, 224, 224, 3), dtype=np.uint8)
+    patches_reb = rng.integers(0, 256, size=(n_patches, 224, 224, 3), dtype=np.uint8)
     return predict_slide(f4, ensemble, patches_orig, patches_reb, mode=mode)

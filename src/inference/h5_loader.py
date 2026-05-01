@@ -1,5 +1,6 @@
-"""Lee un H5 generado por el pipeline TIFF→H5 y devuelve los tensores
-de parches listos para inferencia con F4 (BiT-M).
+"""Lee un H5 generado por el pipeline TIFF→H5 y devuelve los parches
+en uint8 listos para que `predict.py` los convierta a float32 + 224×224
+**en el loop de batches** (evita pico de RAM en slides con muchos parches).
 
 Formato esperado del H5 (port directo de portaanalysis/util_hdf5.py):
     /patches            (N, 2, H, W, 3) uint8
@@ -8,8 +9,13 @@ Formato esperado del H5 (port directo de portaanalysis/util_hdf5.py):
     /patch_categories   (N,)   |S3       "XXX" para inferencia
     /patch_numbers      (N,)   int32     id original de grid
 
-Preprocesamiento aplicado (idéntico a `create_stage2_transforms('bitm')`):
-    1. (N,2,H,W,3) uint8 → (N,3,H,W) float32 en [0,1]
+Por qué uint8 en lugar de float32+resize de golpe: para `ca_1534.h5`
+(3.177 parches), preconvertir a float32 picaba ~12 GB de RAM y mataba
+la VM `g2-standard-4` (16 GB) por OOM. Manteniendo uint8 hasta el batch
+loop, el pico baja a ~1,7 GB.
+
+Preprocesamiento real (lo hace `predict._to_model_tensor` por batch):
+    1. (B, H, W, 3) uint8 → (B, 3, H, W) float32 en [0,1]
     2. Resize bilineal antialias a 224×224 si H,W != 224
     3. NO se normaliza con stats ImageNet (BiT-M no lo requiere).
 """
@@ -22,8 +28,6 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-import torch
-import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +36,8 @@ TARGET_HW = 224
 
 @dataclass
 class H5Patches:
-    patches_orig: torch.Tensor   # (N, 3, 224, 224) float32 [0,1]
-    patches_reb: torch.Tensor    # (N, 3, 224, 224) float32 [0,1]
+    patches_orig: np.ndarray     # (N, H, W, 3) uint8 — sin convertir
+    patches_reb: np.ndarray      # (N, H, W, 3) uint8 — sin convertir
     positions: np.ndarray        # (N, 2) int — (y, x)
     source_image_name: str | None
     raw_size: int                # H=W del parche en el H5 (antes del resize)
@@ -43,28 +47,6 @@ class H5Patches:
     def has_patch_gt(self) -> bool:
         """True si el H5 trae etiquetas patch-level útiles (no todo XXX/?)."""
         return bool(((self.patch_categories != "XXX") & (self.patch_categories != "?")).any())
-
-
-def _patches_to_tensor(patches_np: np.ndarray) -> torch.Tensor:
-    """(N, H, W, 3) uint8 → (N, 3, 224, 224) float32 en [0,1]."""
-    if patches_np.dtype != np.uint8:
-        raise ValueError(f"Esperaba uint8, recibí {patches_np.dtype}")
-    if patches_np.ndim != 4 or patches_np.shape[-1] != 3:
-        raise ValueError(f"Shape inesperado: {patches_np.shape}, esperaba (N,H,W,3)")
-
-    # (N, H, W, 3) → (N, 3, H, W) float32 [0,1]
-    t = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float() / 255.0
-
-    h, w = t.shape[-2:]
-    if (h, w) != (TARGET_HW, TARGET_HW):
-        t = F.interpolate(
-            t,
-            size=(TARGET_HW, TARGET_HW),
-            mode="bilinear",
-            align_corners=False,
-            antialias=True,
-        )
-    return t.contiguous()
 
 
 def load_patches_from_h5(h5_path: Path) -> H5Patches:
@@ -107,11 +89,11 @@ def load_patches_from_h5(h5_path: Path) -> H5Patches:
             v = attrs["source_image_name"]
             source_name = v.decode() if isinstance(v, bytes) else str(v)
 
-    patches_orig = _patches_to_tensor(patches[:, 0])
-    patches_reb = _patches_to_tensor(patches[:, 1])
+    patches_orig = np.ascontiguousarray(patches[:, 0])
+    patches_reb = np.ascontiguousarray(patches[:, 1])
 
     logger.info(
-        "H5 cargado: N=%d, patch_size=%d → resize a %d, source=%s",
+        "H5 cargado: N=%d, patch_size=%d (uint8, resize a %d en GPU), source=%s",
         n, h, TARGET_HW, source_name or "?"
     )
 

@@ -217,7 +217,7 @@ def _render_queue():
             "Tipo": j.input_type.upper(),
             "GT": j.extra.get("slide_gt", "—"),
             "Estado": STATUS_LABELS.get(j.status, j.status.value),
-            "Parches": n_patches,
+            "Parches": str(n_patches) if n_patches != "" else "",
             "Predicción": pred_str,
             "Tiempo": elapsed_str,
             "Subido": datetime.fromtimestamp(j.created_at).strftime("%H:%M:%S"),
