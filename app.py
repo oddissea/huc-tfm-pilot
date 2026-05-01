@@ -51,6 +51,32 @@ def _detect_gt_from_filename(filename: str) -> str | None:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="HUC TFM Pilot", page_icon="🩺", layout="wide")
+
+# Refuerzo visual cuando Streamlit re-ejecuta el script tras un click:
+# Streamlit ya marca con `data-stale="true"` los elementos del frame
+# anterior, pero el dimmed por defecto es muy sutil. Apagamos botones,
+# inputs, dropdowns y radios mientras dura el rerun para que el usuario
+# entienda que la UI está bloqueada.
+st.markdown(
+    """
+    <style>
+    .stApp [data-stale="true"] button,
+    .stApp [data-stale="true"] input,
+    .stApp [data-stale="true"] [role="combobox"],
+    .stApp [data-stale="true"] .stSelectbox,
+    .stApp [data-stale="true"] .stCheckbox,
+    .stApp [data-stale="true"] .stRadio,
+    .stApp [data-stale="true"] [data-testid="stFileUploaderDropzone"] {
+        opacity: 0.35 !important;
+        cursor: progress !important;
+        pointer-events: none !important;
+        transition: opacity 0.15s;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🩺 HUC TFM Pilot")
 st.caption(
     "Demo interactiva del modelo F4 (BiT-M doble canal) + AttnMIL ternario "
