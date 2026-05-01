@@ -103,6 +103,10 @@ with st.sidebar:
             )
             with st.spinner("Descargando pesos y cargando modelos en GPU…"):
                 load_models()
+            # Limpiar el slot antes del rerun para que el botón disabled
+            # del frame previo no quede visible como elemento stale al
+            # cambiar al if branch (st.success "Modelos cargados ✓").
+            btn_slot.empty()
             st.rerun()
 
 
