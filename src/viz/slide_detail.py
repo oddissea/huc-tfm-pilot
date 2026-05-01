@@ -631,6 +631,19 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     cols[2].metric("Parches", str(result["n_patches"]))
     cols[3].metric("Tiempo", f"{result['elapsed_seconds']:.2f} s")
 
+    # ─── Aviso clínico sobre la interpretación de la confianza ──────────────
+    st.info(
+        "**La confianza no es una probabilidad de acierto.** Es la media del "
+        "*softmax* del ensemble (25 modelos AttnMIL) en la clase predicha. "
+        "Un valor alto indica que los modelos del ensemble coinciden con "
+        "*softmax* saturado, **no** que la predicción sea correcta esa "
+        "proporción de veces. El *softmax* no está calibrado: interprétalo "
+        "como **seguridad relativa del modelo**, no como certeza diagnóstica. "
+        "Las barras de error de la sección siguiente miden la dispersión "
+        "entre los 25 modelos del ensemble: una *std* alta indica desacuerdo "
+        "entre miembros."
+    )
+
     # ─── Probabilidades + gauge ─────────────────────────────────────────────
     col_bars, col_gauge = st.columns([3, 2])
     with col_bars:

@@ -179,6 +179,19 @@ class JobManager:
         logger.info("Job %s → %s", job.short_id, status.value)
         return job
 
+    def update_extra(self, job_id: str, **kv) -> Job:
+        """Actualiza job.extra sin tocar el status. Valor None → borra la clave."""
+        with self._lock:
+            job = self._load_unlocked(job_id)
+            for k, v in kv.items():
+                if v is None:
+                    job.extra.pop(k, None)
+                else:
+                    job.extra[k] = v
+            job.updated_at = time.time()
+            self._write_meta(job)
+        return job
+
     def delete(self, job_id: str) -> None:
         with self._lock:
             job_dir = self.root / job_id

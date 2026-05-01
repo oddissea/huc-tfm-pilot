@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -24,6 +25,28 @@ from src.inference.runtime import get_models, load_models, models_loaded, try_ge
 from src.jobs import JobStatus, start_worker
 from src.jobs.manager import get_manager
 from src.viz import render_session_metrics, render_slide_detail
+
+
+# Detección de GT por nombre de fichero. Regex tolerantes a las dos
+# convenciones del HUC:
+#   `<id>_<año>_<clase>_<timestamp>.h5`  → `_no_`, `_ad_`, `_ca_`
+#   `<id>_<año><clase>_<timestamp>.h5`   → `22no_`, `22ad_`, `22ca_`
+#   `<clase>_<id>.h5` (cleaned)          → `ca_`, `ad_`, `no_`
+# Se exige que el token de clase NO esté rodeado de letras (sólo dígitos,
+# inicio de cadena o subrayado/punto), para no confundir `cML_*` con CAR.
+_GT_REGEX = {
+    "NOR": re.compile(r"(?<![a-z])(no|nor)(?![a-z])", re.IGNORECASE),
+    "ADE": re.compile(r"(?<![a-z])(ad|ade)(?![a-z])", re.IGNORECASE),
+    "CAR": re.compile(r"(?<![a-z])(ca|car|tum)(?![a-z])", re.IGNORECASE),
+}
+
+
+def _detect_gt_from_filename(filename: str) -> str | None:
+    """Devuelve "NOR" / "ADE" / "CAR" según patrones del nombre, o None."""
+    for label, pattern in _GT_REGEX.items():
+        if pattern.search(filename):
+            return label
+    return None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -90,16 +113,14 @@ st.caption(
 if not models_loaded():
     st.warning("Los uploads se encolarán pero no se inferirán hasta que cargues los modelos (barra lateral).")
 
-GT_OPTIONS = ("Sin etiqueta", "NOR", "ADE", "CAR")
-gt_choice = st.radio(
-    "Etiqueta GT a nivel de portaobjetos (se aplica a todos los ficheros de esta subida)",
-    options=GT_OPTIONS,
-    index=0,
-    horizontal=True,
-    help="Opcional. Si la indicas, se acumula en la sección 'Métricas acumuladas' "
-         "para construir matriz de confusión slide-level conforme proceses más portaobjetos.",
+auto_detect_gt = st.checkbox(
+    "Auto-detectar GT del nombre del fichero",
+    value=True,
+    help="Reconoce los patrones del HUC: `_no_`/`no_` → NOR, `_ad_`/`ad_` → ADE, "
+         "`_ca_`/`ca_`/`tum` → CAR. Para cualquier slide cuyo nombre no encaje, "
+         "queda sin etiqueta y la puedes asignar manualmente en el editor de "
+         "abajo. Util para subir tandas grandes (p. ej. los 91 del cohort §5.9).",
 )
-slide_gt = None if gt_choice == "Sin etiqueta" else gt_choice
 
 uploads = st.file_uploader(
     "Arrastra uno o varios ficheros",
@@ -109,15 +130,21 @@ uploads = st.file_uploader(
 
 processed_ids: set[str] = st.session_state.setdefault("processed_uploads", set())
 new_uploads = [u for u in (uploads or []) if u.file_id not in processed_ids]
+detected_summary: dict[str | None, int] = {}
 for up in new_uploads:
+    slide_gt = _detect_gt_from_filename(up.name) if auto_detect_gt else None
+    detected_summary[slide_gt] = detected_summary.get(slide_gt, 0) + 1
     try:
         manager.enqueue(up, up.name, slide_gt=slide_gt)
         processed_ids.add(up.file_id)
     except Exception as e:
         st.error(f"No se pudo encolar `{up.name}`: {e}")
 if new_uploads:
-    gt_msg = f" con GT={slide_gt}" if slide_gt else ""
-    st.success(f"Encolados {len(new_uploads)} fichero(s){gt_msg}.")
+    summary = ", ".join(
+        f"{c} × {label or 'sin etiqueta'}"
+        for label, c in sorted(detected_summary.items(), key=lambda kv: (kv[0] is None, kv[0] or ""))
+    )
+    st.success(f"Encolados {len(new_uploads)} fichero(s) — {summary}.")
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +264,39 @@ if jobs:
             for j in failed_jobs:
                 st.markdown(f"**{j.short_id}** — `{j.original_filename}`")
                 st.code(j.error or "(sin detalle)")
+
+    with st.expander("✏️ Editar etiquetas GT"):
+        st.caption(
+            "Corrige (o asigna) la etiqueta GT manualmente. Los cambios se "
+            "guardan al pulsar fuera de la celda y se reflejan al instante en "
+            "'Métricas acumuladas'."
+        )
+        editor_df = pd.DataFrame([
+            {
+                "Fichero": j.original_filename,
+                "GT": j.extra.get("slide_gt") or "—",
+                "Predicción": j.extra.get("predicted_class", "—"),
+            }
+            for j in jobs
+        ])
+        edited = st.data_editor(
+            editor_df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "GT": st.column_config.SelectboxColumn(
+                    options=["—", "NOR", "ADE", "CAR"],
+                    required=False,
+                ),
+            },
+            disabled=["Fichero", "Predicción"],
+            key="gt_editor",
+        )
+        for j, new_gt in zip(jobs, edited["GT"]):
+            new_val: str | None = None if new_gt == "—" else new_gt
+            current = j.extra.get("slide_gt")
+            if new_val != current:
+                manager.update_extra(j.job_id, slide_gt=new_val)
 
     col_a, _ = st.columns([1, 5])
     with col_a:
