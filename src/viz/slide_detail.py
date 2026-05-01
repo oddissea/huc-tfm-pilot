@@ -654,29 +654,40 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     # Se renderiza con Plotly para que el hover muestre #índice + atención
     # (cruzable con los thumbnails del top-K) y para evitar el modal de
     # pantalla completa de st.image.
-    originals = _load_all_originals(job)
-    if originals is not None:
-        patches_arr, patch_size = originals
-        if len(patches_arr) == len(attention):
-            st.markdown(
-                f"**Mapa de atención sobre el slide** "
-                f"— color de la clase predicha ({pred_class}), "
-                f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
-                "ver el índice del parche."
-            )
-            st.plotly_chart(
-                _attention_overlay_figure(
+    n_patches = len(attention)
+    st.markdown(
+        f"**Mapa de atención sobre el slide** "
+        f"— color de la clase predicha ({pred_class}), "
+        f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
+        "ver el índice del parche."
+    )
+    with st.spinner(
+        f"Generando overlay de atención ({n_patches} parches)…"
+    ):
+        originals = _load_all_originals(job)
+        if originals is not None:
+            patches_arr, patch_size = originals
+            if len(patches_arr) == len(attention):
+                fig_overlay = _attention_overlay_figure(
                     positions, attention, patches_arr, patch_size, pred_class,
-                ),
-                use_container_width=True,
-                config={"displayModeBar": True, "scrollZoom": True},
-            )
+                )
+            else:
+                fig_overlay = None
+        else:
+            fig_overlay = None
+    if fig_overlay is not None:
+        st.plotly_chart(
+            fig_overlay,
+            use_container_width=True,
+            config={"displayModeBar": True, "scrollZoom": True},
+        )
 
     # Top-K parches por atención (debajo del overlay para contexto detallado)
     st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
     k = min(top_k, len(attention))
     top_idx = np.argsort(attention)[-k:][::-1].tolist()
-    top_patches = _load_top_patches(job, top_idx)
+    with st.spinner(f"Cargando top-{k} parches…"):
+        top_patches = _load_top_patches(job, top_idx)
 
     if top_patches:
         cols = st.columns(k)
@@ -703,6 +714,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
 
     # Validación patch-level (matriz confusión + métricas) si el H5 trae GT
     if result.get("has_patch_gt"):
-        patch_eval = _load_patch_eval(job)
+        with st.spinner("Construyendo matriz de confusión patch-level…"):
+            patch_eval = _load_patch_eval(job)
         if patch_eval is not None:
             _render_patch_validation(patch_eval, result)
