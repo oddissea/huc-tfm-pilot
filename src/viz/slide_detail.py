@@ -732,9 +732,14 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             use_container_width=True,
         )
 
-    # Validación patch-level (matriz confusión + métricas) si el H5 trae GT
+    # Validación patch-level (matriz confusión + métricas). Slot fijo
+    # con st.empty() para que Streamlit reconcilie limpiamente al cambiar
+    # de slide: el hueco siempre existe; sólo se llena cuando el H5
+    # trae patch_categories útiles.
+    patch_validation_slot = st.empty()
     if result.get("has_patch_gt"):
-        with st.spinner("Construyendo matriz de confusión patch-level…"):
-            patch_eval = _load_patch_eval(job)
-            if patch_eval is not None:
-                _render_patch_validation(patch_eval, result)
+        with patch_validation_slot.container():
+            with st.spinner("Construyendo matriz de confusión patch-level…"):
+                patch_eval = _load_patch_eval(job)
+                if patch_eval is not None:
+                    _render_patch_validation(patch_eval, result)
