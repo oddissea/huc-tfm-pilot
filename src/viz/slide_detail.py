@@ -1198,8 +1198,34 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "(falta DZI). Las métricas y mapas se muestran de todos modos."
         )
 
-    # ─── Vista 'Atención': métricas slide-level + barras + aviso + top-K ────
+    # ─── Vista 'Atención': top-K + métricas slide-level + barras + aviso ────
     if show_att:
+        # Top-K justo debajo del visor: extensión espacial inmediata de los
+        # parches con mayor atención que se ven destacados arriba.
+        st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
+        k = min(top_k, len(attention))
+        top_idx = np.argsort(attention)[-k:][::-1].tolist()
+        with st.spinner(f"Cargando top-{k} parches…"):
+            top_patches = _load_top_patches(job, top_idx)
+        if top_patches:
+            cols = st.columns(k)
+            for i, (idx, patch) in enumerate(zip(top_idx, top_patches)):
+                with cols[i]:
+                    cat = categories[idx] if idx < len(categories) else "?"
+                    cat_label = f" · {cat}" if cat not in ("?", "XXX") else ""
+                    uri = _patch_to_data_uri(patch)
+                    st.markdown(
+                        f'<img src="{uri}" style="width:100%;border-radius:4px;'
+                        f'border:1px solid #e0e0e0;">'
+                        f'<div style="text-align:center;font-size:0.85rem;'
+                        f'color:#555;margin-top:4px;">'
+                        f'#{idx} · α={attention[idx]:.4f}{cat_label}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+        st.divider()
+
+        # Métricas slide-level del veredicto del AttnMIL
         cols = st.columns(4)
         cols[0].metric("Predicción", pred_class)
         cols[1].metric("Confianza", f"{max_prob:.1%}")
@@ -1241,27 +1267,6 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "Las barras de error miden la dispersión entre los 5 modelos "
             "del *ensemble*: una *std* alta indica desacuerdo entre miembros."
         )
-
-        st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
-        k = min(top_k, len(attention))
-        top_idx = np.argsort(attention)[-k:][::-1].tolist()
-        with st.spinner(f"Cargando top-{k} parches…"):
-            top_patches = _load_top_patches(job, top_idx)
-        if top_patches:
-            cols = st.columns(k)
-            for i, (idx, patch) in enumerate(zip(top_idx, top_patches)):
-                with cols[i]:
-                    cat = categories[idx] if idx < len(categories) else "?"
-                    cat_label = f" · {cat}" if cat not in ("?", "XXX") else ""
-                    uri = _patch_to_data_uri(patch)
-                    st.markdown(
-                        f'<img src="{uri}" style="width:100%;border-radius:4px;'
-                        f'border:1px solid #e0e0e0;">'
-                        f'<div style="text-align:center;font-size:0.85rem;'
-                        f'color:#555;margin-top:4px;">'
-                        f'#{idx} · α={attention[idx]:.4f}{cat_label}</div>',
-                        unsafe_allow_html=True,
-                    )
 
     # ─── Vista 'Predicciones por parche': bar chart + inspector + matriz ────
     elif show_pred and patch_eval is not None:
