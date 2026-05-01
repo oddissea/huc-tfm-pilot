@@ -486,9 +486,133 @@ def _patch_predictions_bars(pred_index: np.ndarray) -> go.Figure:
     return fig
 
 
-def _render_patch_predictions(patch_eval: dict) -> None:
-    """Sección 'Predicciones por parche' (sin GT). Siempre disponible si el
-    worker dejó patch_eval.npz."""
+def _patch_predictions_overlay(
+    positions: np.ndarray,
+    pred_index: np.ndarray,
+    patches_orig: np.ndarray,
+    patch_raw_size: int,
+    attention: np.ndarray | None = None,
+    thumb_size: int = 48,
+    base_opacity: float = 0.65,
+) -> np.ndarray:
+    """Mosaico de los parches reales con capa coloreada por la clase predicha
+    de cada parche (verde=NOR, naranja=ADE, azul=CAR). Si se pasa `attention`,
+    la opacidad se modula por atención (el AttnMIL pesa más unos parches que
+    otros). Devuelve uint8 RGB.
+    """
+    pos = np.asarray(positions, dtype=np.int64)
+    n = len(pos)
+    if n == 0:
+        return np.ones((thumb_size, thumb_size, 3), dtype=np.uint8) * 255
+
+    y_min, x_min = int(pos[:, 0].min()), int(pos[:, 1].min())
+    rows = (pos[:, 0] - y_min) // patch_raw_size
+    cols = (pos[:, 1] - x_min) // patch_raw_size
+    n_rows = int(rows.max()) + 1
+    n_cols = int(cols.max()) + 1
+    s = thumb_size
+
+    canvas = np.full((n_rows * s, n_cols * s, 3), 255, dtype=np.uint8)
+    for i in range(n):
+        r, c = int(rows[i]), int(cols[i])
+        thumb = cv2.resize(patches_orig[i], (s, s), interpolation=cv2.INTER_AREA)
+        canvas[r * s:(r + 1) * s, c * s:(c + 1) * s] = thumb
+
+    if attention is not None and attention.size:
+        a_max = float(attention.max()) or 1.0
+        alpha_per_patch = (attention / a_max) * base_opacity
+    else:
+        alpha_per_patch = np.full(n, base_opacity, dtype=np.float32)
+
+    overlay_rgba = np.zeros((n_rows * s, n_cols * s, 4), dtype=np.float32)
+    for i in range(n):
+        cls = CLASS_NAMES[int(pred_index[i])]
+        color = np.array(CLASS_COLORS_RGB[cls], dtype=np.float32)
+        r, c = int(rows[i]), int(cols[i])
+        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, :3] = color
+        overlay_rgba[r * s:(r + 1) * s, c * s:(c + 1) * s, 3] = float(alpha_per_patch[i])
+
+    canvas_f = canvas.astype(np.float32) / 255.0
+    alpha = overlay_rgba[..., 3:4]
+    blended = canvas_f * (1.0 - alpha) + overlay_rgba[..., :3] * alpha
+    return (np.clip(blended, 0, 1) * 255).astype(np.uint8)
+
+
+def _patch_predictions_overlay_figure(
+    positions: np.ndarray,
+    pred_index: np.ndarray,
+    patches_orig: np.ndarray,
+    patch_raw_size: int,
+    attention: np.ndarray | None,
+    thumb_size: int = 48,
+    base_opacity: float = 0.65,
+) -> go.Figure:
+    """Plotly versión del overlay de predicciones por parche. Hover muestra
+    `#índice + clase predicha + atención`.
+    """
+    overlay = _patch_predictions_overlay(
+        positions, pred_index, patches_orig, patch_raw_size,
+        attention=attention, thumb_size=thumb_size, base_opacity=base_opacity,
+    )
+    h, w, _ = overlay.shape
+
+    pos = np.asarray(positions, dtype=np.int64)
+    n = len(pos)
+    y_min, x_min = int(pos[:, 0].min()), int(pos[:, 1].min())
+    rows = (pos[:, 0] - y_min) // patch_raw_size
+    cols = (pos[:, 1] - x_min) // patch_raw_size
+    s = thumb_size
+    centers_x = cols * s + s / 2
+    centers_y = rows * s + s / 2
+
+    pred_class_names = np.array([CLASS_NAMES[int(p)] for p in pred_index])
+    if attention is not None and attention.size:
+        a_max = float(attention.max()) or 1.0
+        rel = attention / a_max
+        customdata = np.column_stack([np.arange(n), pred_class_names, attention, rel])
+        hover = (
+            "#%{customdata[0]}<br>"
+            "predicción=%{customdata[1]}<br>"
+            "atención=%{customdata[2]:.4f} "
+            "(%{customdata[3]:.0%} del máximo)<extra></extra>"
+        )
+    else:
+        customdata = np.column_stack([np.arange(n), pred_class_names])
+        hover = (
+            "#%{customdata[0]}<br>"
+            "predicción=%{customdata[1]}<extra></extra>"
+        )
+
+    fig = go.Figure()
+    fig.add_trace(go.Image(z=overlay, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(
+        x=centers_x,
+        y=centers_y,
+        mode="markers",
+        marker=dict(size=max(8, s * 0.7), color="rgba(0,0,0,0)"),
+        customdata=customdata,
+        hovertemplate=hover,
+        showlegend=False,
+    ))
+    fig.update_layout(
+        height=min(700, max(320, h)),
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis=dict(visible=False, range=[0, w]),
+        yaxis=dict(visible=False, range=[h, 0]),
+        dragmode="pan",
+    )
+    return fig
+
+
+def _render_patch_predictions(
+    patch_eval: dict,
+    positions: np.ndarray | None = None,
+    patches_arr: np.ndarray | None = None,
+    patch_size: int | None = None,
+    attention: np.ndarray | None = None,
+) -> None:
+    """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
+    + overlay del slide coloreado por predicción de cada parche."""
     pred_index = np.asarray(patch_eval.get("pred_index"), dtype=np.int64)
     if pred_index.size == 0:
         return
@@ -503,6 +627,25 @@ def _render_patch_predictions(patch_eval: dict) -> None:
         "clase mayoritaria de las barras."
     )
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
+
+    if (positions is not None and patches_arr is not None
+            and patch_size is not None and len(patches_arr) == len(pred_index)):
+        st.markdown(
+            "**Mapa de predicciones por parche** — verde NOR, naranja ADE, "
+            "azul CAR. La opacidad de cada parche se modula por la atención "
+            "del AttnMIL (parches con mayor peso en la decisión slide-level "
+            "se ven más saturados)."
+        )
+        with st.spinner(f"Generando mapa de predicciones ({len(pred_index)} parches)…"):
+            fig_pred = _patch_predictions_overlay_figure(
+                positions, pred_index, patches_arr, patch_size,
+                attention=attention,
+            )
+            st.plotly_chart(
+                fig_pred,
+                use_container_width=True,
+                config={"displayModeBar": True, "scrollZoom": True},
+            )
 
 
 def _render_patch_validation(patch_eval: dict, result: dict) -> None:
@@ -749,18 +892,18 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         f"intensidad ∝ atención del AttnMIL. Pasa el ratón para "
         "ver el índice del parche."
     )
+    # Cargamos originals una sola vez para reusar luego en el mapa de
+    # predicciones por parche (sección de abajo).
+    originals = _load_all_originals(job)
+    patches_arr, patch_size = originals if originals is not None else (None, None)
+
     with st.spinner(
         f"Generando overlay de atención ({n_patches} parches)…"
     ):
-        originals = _load_all_originals(job)
-        if originals is not None:
-            patches_arr, patch_size = originals
-            if len(patches_arr) == len(attention):
-                fig_overlay = _attention_overlay_figure(
-                    positions, attention, patches_arr, patch_size, pred_class,
-                )
-            else:
-                fig_overlay = None
+        if patches_arr is not None and len(patches_arr) == len(attention):
+            fig_overlay = _attention_overlay_figure(
+                positions, attention, patches_arr, patch_size, pred_class,
+            )
         else:
             fig_overlay = None
         if fig_overlay is not None:
@@ -793,22 +936,23 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                     unsafe_allow_html=True,
                 )
 
-    # Scatter interactivo (Plotly) en expander para inspección hover
-    with st.expander("Mapa interactivo de atención (hover para detalle)"):
-        st.plotly_chart(
-            _attention_scatter(positions, attention, categories),
-            use_container_width=True,
-        )
-
-    # Predicciones por parche del clasificador F4: distribución siempre
-    # disponible, validación con matriz de confusión solo si el H5 trae GT.
-    # Slot fijo con st.empty() para que Streamlit reconcilie limpio al
-    # cambiar de slide.
+    # Predicciones por parche del clasificador F4: distribución +
+    # mapa de slide coloreado por clase predicha (verde/naranja/azul).
+    # Validación con matriz de confusión solo si el H5 trae GT. Slot fijo
+    # con st.empty() para que Streamlit reconcilie limpio al cambiar de slide.
     patch_section_slot = st.empty()
     patch_eval = _load_patch_eval(job)
     if patch_eval is not None:
         with patch_section_slot.container():
-            with st.spinner("Cargando predicciones a nivel de parche…"):
-                _render_patch_predictions(patch_eval)
-                if result.get("has_patch_gt"):
-                    _render_patch_validation(patch_eval, result)
+            # Reusamos los originals + patch_size del overlay de atención
+            # (ya cargados arriba) para no leer el H5 dos veces.
+            originals_data = originals if originals is not None else (None, None)
+            _render_patch_predictions(
+                patch_eval,
+                positions=positions,
+                patches_arr=originals_data[0] if originals_data[0] is not None else None,
+                patch_size=originals_data[1] if originals_data[1] is not None else None,
+                attention=attention,
+            )
+            if result.get("has_patch_gt"):
+                _render_patch_validation(patch_eval, result)
