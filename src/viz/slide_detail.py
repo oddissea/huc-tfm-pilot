@@ -472,6 +472,9 @@ def _render_openseadragon_viewer(
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         att_arr = np.asarray(attention) if attention is not None else None
         att_max = float(att_arr.max()) if (att_arr is not None and att_arr.size > 0) else 0.0
+        # patch_probs viene del classifier F4 — útil para mostrar la confianza
+        # de la predicción del PARCHE (no del slide) en el hover en modo
+        # 'predicciones'. Se carga desde el patch_eval.npz si está disponible.
         items = []
         for i, (pos, p) in enumerate(zip(positions, pred_index)):
             cls = CLASS_NAMES[int(p)]
@@ -498,6 +501,19 @@ def _render_openseadragon_viewer(
                 )
             items.append(item)
         overlays_json = json.dumps(items)
+
+    # Pasamos también `pred_probs` por separado para construir hints según
+    # el modo activo. Lectura desde el job (no acoplamos a la signature).
+    patch_eval = _load_patch_eval(job)
+    pred_probs_json = "null"
+    if (patch_eval is not None and "pred_probs" in patch_eval
+            and pred_index is not None):
+        pp = np.asarray(patch_eval["pred_probs"])
+        if pp.shape[0] == len(pred_index):
+            # Solo guardamos la prob de la clase predicha por parche para
+            # no inflar el JSON. Suficiente para el hint clínico.
+            pp_max = pp[np.arange(len(pred_index)), pred_index].astype(float)
+            pred_probs_json = json.dumps([round(float(v), 3) for v in pp_max])
 
     # `data-show-pred` y `data-show-att` se interpolan al HTML para que
     # el JS pinte/oculte cada layer. Cambiar los toggles en Streamlit
@@ -533,6 +549,7 @@ def _render_openseadragon_viewer(
       }});
 
       const overlays = {overlays_json};
+      const PRED_PROBS = {pred_probs_json};
       const SHOW_PRED = {show_pred_js};
       const SHOW_ATT = {show_att_js};
       const SVG_NS = "http://www.w3.org/2000/svg";
@@ -567,10 +584,21 @@ def _render_openseadragon_viewer(
 
           const div = document.createElement("div");
           div.className = "osd-patch";
-          let tip = `#${{o.idx}} · ${{o.cls}}`;
-          if (o.att !== undefined) {{
+          // Hint adaptativo según el modo activo:
+          //   - Predicciones: foco en la confianza F4 del parche (clase + prob)
+          //   - Atención: foco en peso del AttnMIL (relativo al máximo)
+          let tip;
+          if (SHOW_PRED) {{
+            const prob = (PRED_PROBS && PRED_PROBS[o.idx] !== undefined)
+              ? ` · F4 prob ${{(PRED_PROBS[o.idx] * 100).toFixed(1)}}%`
+              : "";
+            tip = `#${{o.idx}} · clase predicha ${{o.cls}}${{prob}}`;
+          }} else if (SHOW_ATT && o.att !== undefined) {{
             const pct = (o.att_rel * 100).toFixed(0);
-            tip += ` · atención ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`;
+            tip = `#${{o.idx}} · atención AttnMIL ${{o.att.toFixed(4)}} `
+                + `(${{pct}}% del máximo) · clase F4 ${{o.cls}}`;
+          }} else {{
+            tip = `#${{o.idx}} · ${{o.cls}}`;
           }}
           div.title = tip;
           div.appendChild(svg);
