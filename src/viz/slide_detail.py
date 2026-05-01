@@ -666,6 +666,88 @@ def _render_patch_predictions(
                 config={"displayModeBar": True, "scrollZoom": True},
             )
 
+        # Inspección de parche en detalle: el mosaico arriba sigue intacto;
+        # aquí simplemente añadimos un panel para ver UN parche a tamaño
+        # nativo (300×300) con su metadata, navegando con ← /→. Sin tocar
+        # Plotly, sin event capture: pure Streamlit.
+        n = len(pred_index)
+        sel_key = f"detail_idx_{job_id}" if job_id else "detail_idx"
+        if sel_key not in st.session_state:
+            st.session_state[sel_key] = -1
+
+        st.markdown("**Inspeccionar parche en detalle**")
+        ctrl_cols = st.columns([1, 6, 1])
+        with ctrl_cols[0]:
+            if st.button("←", key=f"prev_{sel_key}", disabled=(st.session_state[sel_key] <= 0)):
+                st.session_state[sel_key] -= 1
+                st.rerun()
+        with ctrl_cols[1]:
+            options = [-1] + list(range(n))
+            sel = st.selectbox(
+                "Índice del parche (—  = ocultar)",
+                options=options,
+                index=options.index(st.session_state[sel_key]),
+                format_func=lambda i: "—" if i == -1 else f"#{i}",
+                key=f"sel_{sel_key}",
+                label_visibility="collapsed",
+            )
+            if sel != st.session_state[sel_key]:
+                st.session_state[sel_key] = sel
+                st.rerun()
+        with ctrl_cols[2]:
+            if st.button("→", key=f"next_{sel_key}", disabled=(st.session_state[sel_key] >= n - 1)):
+                st.session_state[sel_key] = max(0, st.session_state[sel_key] + 1)
+                st.rerun()
+
+        idx = st.session_state[sel_key]
+        if 0 <= idx < n:
+            patch_full = np.asarray(patches_arr[idx])  # (H, W, 3) uint8 a tamaño nativo
+            pred_probs = patch_eval.get("pred_probs")
+            probs_str = ""
+            if pred_probs is not None:
+                pp = np.asarray(pred_probs)[idx]
+                probs_str = " · ".join(f"{c}={p:.3f}" for c, p in zip(CLASS_NAMES, pp))
+            pred_cls = CLASS_NAMES[int(pred_index[idx])]
+            color_hex = CLASS_COLORS[pred_cls]
+
+            # GT por parche si está disponible
+            gt_label = None
+            cats_ternary = patch_eval.get("cats_ternary")
+            if cats_ternary is not None:
+                cat = str(cats_ternary[idx])
+                if cat in CLASS_NAMES:
+                    gt_label = cat
+                elif cat == "EXCLUDED":
+                    cats_raw = patch_eval.get("cats_raw")
+                    if cats_raw is not None:
+                        gt_label = f"excluido ({str(cats_raw[idx])})"
+
+            att_val = float(attention[idx]) if attention is not None else None
+            att_rel = (att_val / float(attention.max())) if (att_val is not None and attention.max() > 0) else None
+
+            img_col, info_col = st.columns([1, 1])
+            with img_col:
+                uri = _patch_to_data_uri(patch_full)
+                st.markdown(
+                    f'<img src="{uri}" style="width:100%;border:4px solid {color_hex};'
+                    f'border-radius:6px;">'
+                    f'<div style="text-align:center;font-size:0.9rem;'
+                    f'color:#555;margin-top:6px;">parche #{idx} · '
+                    f'tamaño nativo {patch_full.shape[1]}×{patch_full.shape[0]} px</div>',
+                    unsafe_allow_html=True,
+                )
+            with info_col:
+                st.metric("Predicción F4", pred_cls)
+                if probs_str:
+                    st.caption(f"Probabilidades F4: {probs_str}")
+                if att_val is not None:
+                    rel_text = f" ({att_rel:.0%} del máximo del slide)" if att_rel is not None else ""
+                    st.metric("Atención AttnMIL", f"{att_val:.4f}{rel_text}")
+                if gt_label is not None:
+                    st.metric("GT (etiqueta del H5)", gt_label)
+                pos_y, pos_x = int(positions[idx][0]), int(positions[idx][1])
+                st.caption(f"Posición en slide: y={pos_y}, x={pos_x}")
+
 
 def _render_patch_validation(patch_eval: dict, result: dict) -> None:
     """Sección 'Validación a nivel de parche' bajo el detalle del slide.
