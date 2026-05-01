@@ -439,6 +439,7 @@ def _render_openseadragon_viewer(
     positions: np.ndarray | None = None,
     pred_index: np.ndarray | None = None,
     patch_raw_size: int | None = None,
+    dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
 ) -> bool:
     """Si el job tiene `slide.dzi` (sólo TIFFs), embebe un visor OpenSeadragon
@@ -455,8 +456,11 @@ def _render_openseadragon_viewer(
         return False
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
-    # Construye el JSON con posiciones + clase de cada parche.
+    # Construye el JSON con posiciones + clase de cada parche, restando
+    # el offset del DZI stitched (las posiciones del H5 están en coords
+    # del WSI completo; el DZI stitched empieza en (y_min, x_min)).
     overlays_json = "[]"
+    y_off, x_off = dzi_offset
     if (positions is not None and pred_index is not None
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         items = []
@@ -465,7 +469,8 @@ def _render_openseadragon_viewer(
             r, g, b = CLASS_COLORS_RGB[cls]
             color = f"rgb({int(r*255)},{int(g*255)},{int(b*255)})"
             items.append({
-                "x": int(pos[1]), "y": int(pos[0]),
+                "x": int(pos[1]) - int(x_off),
+                "y": int(pos[0]) - int(y_off),
                 "size": int(patch_raw_size),
                 "color": color,
                 "idx": i,
@@ -1188,11 +1193,16 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         else None
     )
     osd_patch_size = result.get("patch_raw_size")
+    osd_offset = (
+        int(job.extra.get("dzi_y_min", 0)),
+        int(job.extra.get("dzi_x_min", 0)),
+    )
     if _render_openseadragon_viewer(
         job,
         positions=osd_positions,
         pred_index=osd_pred_index,
         patch_raw_size=osd_patch_size,
+        dzi_offset=osd_offset,
     ):
         st.caption(
             "Visor profesional con tiles multi-resolución (OpenSeadragon). "

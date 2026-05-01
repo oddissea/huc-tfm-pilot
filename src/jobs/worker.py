@@ -58,41 +58,46 @@ _stop_event = threading.Event()
 
 def _do_preprocess(manager: JobManager, job: Job) -> None:
     try:
+        extra: dict = {}
         if job.input_type == "tiff":
             t0 = time.time()
             n_patches = convert_tiff_to_h5(job.raw_path, job.h5_path)
             conversion_seconds = time.time() - t0
-
-            # Genera tiles DZI desde el TIFF para el visor OpenSeadragon.
-            # Best effort: si falla (libvips no disponible, TIFF corrupto),
-            # seguimos con la inferencia — el viewer pro queda ausente pero
-            # el resto del flujo funciona.
-            extra = {
-                "n_patches": n_patches,
-                "conversion_seconds": round(conversion_seconds, 2),
-            }
-            try:
-                from src.preprocessing.dzi import generate_dzi
-                t1 = time.time()
-                generate_dzi(job.raw_path, job.job_dir, basename="slide")
-                extra["dzi_seconds"] = round(time.time() - t1, 2)
-                extra["has_dzi"] = True
-                logger.info("DZI generado para %s en %.1fs", job.short_id, extra["dzi_seconds"])
-            except Exception as dzi_e:
-                logger.warning(
-                    "Job %s: DZI generation falló (%s) — continúo sin viewer pro",
-                    job.short_id, dzi_e,
-                )
-
-            manager.update_status(job.job_id, JobStatus.CONVERTED, extra=extra)
-            manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
-
+            extra["n_patches"] = n_patches
+            extra["conversion_seconds"] = round(conversion_seconds, 2)
         elif job.input_type == "h5":
             shutil.copyfile(job.raw_path, job.h5_path)
-            manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
-
         else:
             raise ValueError(f"Tipo de input desconocido: {job.input_type}")
+
+        # Genera tiles DZI stitcheando los parches del H5 en una imagen
+        # 'solo tejido'. Funciona para H5 y TIFF (los TIFF ya pasaron por
+        # convert_tiff_to_h5 arriba). Coordenadas idénticas a las del
+        # AttnMIL → overlay pixel-perfect con las predicciones.
+        # Best effort: si falla, seguimos con inferencia y mosaicos como
+        # fallback. Status quo si pyvips/libvips no están disponibles.
+        try:
+            from src.preprocessing.dzi import generate_dzi_from_h5
+            t1 = time.time()
+            _dzi_path, (y_min, x_min) = generate_dzi_from_h5(
+                job.h5_path, job.job_dir, basename="slide",
+            )
+            extra["dzi_seconds"] = round(time.time() - t1, 2)
+            extra["has_dzi"] = True
+            extra["dzi_y_min"] = int(y_min)
+            extra["dzi_x_min"] = int(x_min)
+            logger.info(
+                "DZI desde H5 generado para %s en %.1fs (offset y=%d x=%d)",
+                job.short_id, extra["dzi_seconds"], y_min, x_min,
+            )
+        except Exception as dzi_e:
+            logger.warning(
+                "Job %s: DZI generation falló (%s) — continúo sin viewer pro",
+                job.short_id, dzi_e,
+            )
+
+        manager.update_status(job.job_id, JobStatus.CONVERTED, extra=extra)
+        manager.update_status(job.job_id, JobStatus.READY_FOR_INFERENCE)
 
     except Exception as e:
         logger.exception("Job %s falló en preprocesado", job.short_id)
