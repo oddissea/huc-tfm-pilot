@@ -434,9 +434,18 @@ def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float | int]]:
     return out
 
 
-def _render_openseadragon_viewer(job: "Job", height: int = 620) -> bool:
+def _render_openseadragon_viewer(
+    job: "Job",
+    positions: np.ndarray | None = None,
+    pred_index: np.ndarray | None = None,
+    patch_raw_size: int | None = None,
+    height: int = 620,
+) -> bool:
     """Si el job tiene `slide.dzi` (sólo TIFFs), embebe un visor OpenSeadragon
-    apuntando a `/dzi/<job_id>/slide.dzi`. Devuelve True si se renderizó.
+    apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones + predicciones,
+    dibuja un overlay HTML con un rectángulo del color de la clase predicha
+    sobre cada parche en sus coordenadas reales del WSI. Devuelve True si se
+    renderizó.
 
     nginx sirve el directorio `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
     (ver `nginx.conf` location /dzi/). El navegador hereda BasicAuth
@@ -445,12 +454,37 @@ def _render_openseadragon_viewer(job: "Job", height: int = 620) -> bool:
     if not job.dzi_path.exists():
         return False
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
+
+    # Construye el JSON con posiciones + clase de cada parche.
+    overlays_json = "[]"
+    if (positions is not None and pred_index is not None
+            and patch_raw_size is not None and len(positions) == len(pred_index)):
+        items = []
+        for i, (pos, p) in enumerate(zip(positions, pred_index)):
+            cls = CLASS_NAMES[int(p)]
+            r, g, b = CLASS_COLORS_RGB[cls]
+            color = f"rgb({int(r*255)},{int(g*255)},{int(b*255)})"
+            items.append({
+                "x": int(pos[1]), "y": int(pos[0]),
+                "size": int(patch_raw_size),
+                "color": color,
+                "idx": i,
+                "cls": cls,
+            })
+        overlays_json = json.dumps(items)
+
     html = f"""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+    <style>
+      .osd-patch {{
+        box-sizing: border-box;
+        pointer-events: none;
+      }}
+    </style>
     <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:#222;border-radius:6px;"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
     <script>
-      OpenSeadragon({{
+      const viewer = OpenSeadragon({{
         id: "osd-{job.job_id}",
         prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
         tileSources: "{dzi_url}",
@@ -465,6 +499,23 @@ def _render_openseadragon_viewer(job: "Job", height: int = 620) -> bool:
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
+      }});
+
+      const overlays = {overlays_json};
+      viewer.addHandler("open", function() {{
+        for (const o of overlays) {{
+          const div = document.createElement("div");
+          div.className = "osd-patch";
+          // Borde grueso de 4 px del color de la clase, fondo transparente.
+          div.style.border = `3px solid ${{o.color}}`;
+          div.title = `#${{o.idx}} · ${{o.cls}}`;
+          viewer.addOverlay({{
+            element: div,
+            location: viewer.viewport.imageToViewportRectangle(
+              o.x, o.y, o.size, o.size
+            ),
+          }});
+        }}
       }});
     </script>
     """
@@ -1102,11 +1153,29 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     # Solo se genera DZI cuando se sube un TIFF original (los H5 ya parcheados
     # no tienen WSI completo). Si existe, lo mostramos antes de los mosaicos
     # de atención/predicciones para que sea la primera vista del patólogo.
-    if _render_openseadragon_viewer(job):
+    # Cargamos posiciones y predicciones por parche para dibujar overlays
+    # coloreados sobre el WSI directamente (verde NOR / naranja ADE / azul CAR).
+    _patch_eval_for_osd = _load_patch_eval(job)
+    _h5_meta_for_osd = _load_h5_meta(job)
+    osd_positions = _h5_meta_for_osd[0] if _h5_meta_for_osd is not None else None
+    osd_pred_index = (
+        np.asarray(_patch_eval_for_osd["pred_index"], dtype=np.int64)
+        if _patch_eval_for_osd is not None and "pred_index" in _patch_eval_for_osd
+        else None
+    )
+    osd_patch_size = result.get("patch_raw_size")
+    if _render_openseadragon_viewer(
+        job,
+        positions=osd_positions,
+        pred_index=osd_pred_index,
+        patch_raw_size=osd_patch_size,
+    ):
         st.caption(
             "Visor profesional con tiles multi-resolución (OpenSeadragon). "
-            "Pan con arrastrar, zoom con rueda. Los mosaicos coloreados de "
-            "atención y predicciones siguen disponibles más abajo."
+            "Pan con arrastrar, zoom con rueda. Cada parche se dibuja con un "
+            "borde del color de la clase predicha (verde NOR / naranja ADE / "
+            "azul CAR). Los mosaicos coloreados de atención y predicciones "
+            "siguen disponibles más abajo."
         )
 
     # ─── Atención: requiere attention.npy + positions del H5 ────────────────
