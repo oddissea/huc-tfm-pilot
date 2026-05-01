@@ -675,12 +675,12 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 fig_overlay = None
         else:
             fig_overlay = None
-    if fig_overlay is not None:
-        st.plotly_chart(
-            fig_overlay,
-            use_container_width=True,
-            config={"displayModeBar": True, "scrollZoom": True},
-        )
+        if fig_overlay is not None:
+            st.plotly_chart(
+                fig_overlay,
+                use_container_width=True,
+                config={"displayModeBar": True, "scrollZoom": True},
+            )
 
     # Top-K parches por atención (debajo del overlay para contexto detallado)
     st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
@@ -716,5 +716,5 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     if result.get("has_patch_gt"):
         with st.spinner("Construyendo matriz de confusión patch-level…"):
             patch_eval = _load_patch_eval(job)
-        if patch_eval is not None:
-            _render_patch_validation(patch_eval, result)
+            if patch_eval is not None:
+                _render_patch_validation(patch_eval, result)
