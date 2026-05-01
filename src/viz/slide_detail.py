@@ -561,7 +561,7 @@ def _render_openseadragon_viewer(
             sr.setAttribute("width", "0.97"); sr.setAttribute("height", "0.97");
             sr.setAttribute("fill", "none");
             sr.setAttribute("stroke", o.color);
-            sr.setAttribute("stroke-width", "0.025");
+            sr.setAttribute("stroke-width", "0.06");
             svg.appendChild(sr);
           }}
 
