@@ -284,7 +284,36 @@ def _render_queue():
             "Actualizado": _human_age(j.updated_at),
         })
     df = pd.DataFrame(rows)
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    event = st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="multi-row",
+        key="queue_table",
+    )
+
+    # Acción "eliminar seleccionados" cuando el usuario marca filas. Se
+    # gestiona dentro del fragment para que rerunee localmente.
+    selected_rows: list[int] = []
+    try:
+        selected_rows = list(event.selection.rows)   # type: ignore[attr-defined]
+    except Exception:
+        selected_rows = []
+
+    if selected_rows:
+        n_sel = len(selected_rows)
+        col_btn, _ = st.columns([1, 5])
+        with col_btn:
+            if st.button(
+                f"🗑️ Eliminar {n_sel} seleccionado{'s' if n_sel > 1 else ''}",
+                key="btn_delete_selected",
+                type="primary",
+            ):
+                for idx in selected_rows:
+                    if 0 <= idx < len(jobs_local):
+                        manager.delete(jobs_local[idx].job_id)
+                st.rerun()
 
 
 # Expander que envuelve la tabla + sub-expanders (errores, editor GT) +
