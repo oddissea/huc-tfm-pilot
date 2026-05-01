@@ -695,12 +695,21 @@ def _render_patch_predictions(
             "**Inspeccionar parche en detalle** — *click en un parche del "
             "mosaico para inspeccionarlo, o usa los controles abajo*"
         )
+
+        def _nav_idx(delta: int, key: str, n_max: int) -> None:
+            """Callback on_click: corre ANTES de evaluar los widgets, por
+            eso puede modificar st.session_state[key] aunque el selectbox
+            posterior tenga ese mismo key."""
+            cur = st.session_state.get(key, -1)
+            st.session_state[key] = max(0, min(n_max - 1, cur + delta))
+
         ctrl_cols = st.columns([1, 6, 1])
         with ctrl_cols[0]:
-            if st.button("←", key=f"prev_{sel_key}",
-                         disabled=(st.session_state[sel_key] <= 0)):
-                st.session_state[sel_key] -= 1
-                st.rerun()
+            st.button(
+                "←", key=f"prev_{sel_key}",
+                disabled=(st.session_state[sel_key] <= 0),
+                on_click=_nav_idx, args=(-1, sel_key, n),
+            )
         with ctrl_cols[1]:
             # El selectbox usa la MISMA key que el state principal (sel_key)
             # para que se mantenga sincronizado con clicks del mosaico y los
@@ -715,10 +724,11 @@ def _render_patch_predictions(
                 label_visibility="collapsed",
             )
         with ctrl_cols[2]:
-            if st.button("→", key=f"next_{sel_key}",
-                         disabled=(st.session_state[sel_key] >= n - 1)):
-                st.session_state[sel_key] = max(0, st.session_state[sel_key] + 1)
-                st.rerun()
+            st.button(
+                "→", key=f"next_{sel_key}",
+                disabled=(st.session_state[sel_key] >= n - 1),
+                on_click=_nav_idx, args=(1, sel_key, n),
+            )
 
         idx = st.session_state[sel_key]
         if 0 <= idx < n:
