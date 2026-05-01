@@ -486,13 +486,14 @@ def _render_openseadragon_viewer(
         pointer-events: none;
       }}
     </style>
-    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:#222;border-radius:6px;"></div>
+    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
     <script>
       const viewer = OpenSeadragon({{
         id: "osd-{job.job_id}",
         prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
         tileSources: "{dzi_url}",
+        background: "transparent",
         showNavigator: true,
         navigatorPosition: "BOTTOM_RIGHT",
         navigatorHeight: 100,
@@ -530,7 +531,7 @@ def _render_openseadragon_viewer(
           rect.setAttribute("height", "0.92");
           rect.setAttribute("fill", "none");
           rect.setAttribute("stroke", o.color);
-          rect.setAttribute("stroke-width", "0.08");
+          rect.setAttribute("stroke-width", "0.035");
           svg.appendChild(rect);
 
           const div = document.createElement("div");
