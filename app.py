@@ -163,6 +163,8 @@ if new_uploads:
 # cuando el patólogo está mirando un resultado)
 # ---------------------------------------------------------------------------
 
+st.subheader("Cola acumulada")
+
 _jobs_now = manager.list_jobs()
 _n_active = sum(1 for _j in _jobs_now if _j.status in {
     JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.CONVERTED,
