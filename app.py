@@ -52,11 +52,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 st.set_page_config(page_title="HUC TFM Pilot", page_icon="🩺", layout="wide")
 
-# Refuerzo visual cuando Streamlit re-ejecuta el script tras un click:
+# Refuerzo visual cuando Streamlit re-ejecuta el script tras un click.
 # Streamlit ya marca con `data-stale="true"` los elementos del frame
-# anterior, pero el dimmed por defecto es muy sutil. Apagamos botones,
-# inputs, dropdowns y radios mientras dura el rerun para que el usuario
-# entienda que la UI está bloqueada.
+# anterior, pero el dimmed por defecto es muy sutil. Bajamos la opacidad
+# y cambiamos el cursor para que el usuario entienda que hay actividad.
+# OJO: NO usamos `pointer-events: none` para que, si un rerun se queda
+# colgado (p. ej. WebSocket caído), el usuario pueda clicar para forzar
+# un refresco y salir del estado bloqueado. Streamlit ya encola clicks
+# durante el rerun internamente.
 st.markdown(
     """
     <style>
@@ -67,9 +70,8 @@ st.markdown(
     .stApp [data-stale="true"] .stCheckbox,
     .stApp [data-stale="true"] .stRadio,
     .stApp [data-stale="true"] [data-testid="stFileUploaderDropzone"] {
-        opacity: 0.35 !important;
+        opacity: 0.45 !important;
         cursor: progress !important;
-        pointer-events: none !important;
         transition: opacity 0.15s;
     }
     </style>
