@@ -52,33 +52,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 st.set_page_config(page_title="HUC TFM Pilot", page_icon="🩺", layout="wide")
 
-# Refuerzo visual cuando Streamlit re-ejecuta el script tras un click.
-# Streamlit ya marca con `data-stale="true"` los elementos del frame
-# anterior, pero el dimmed por defecto es muy sutil. Bajamos la opacidad
-# y cambiamos el cursor para que el usuario entienda que hay actividad.
-# OJO: NO usamos `pointer-events: none` para que, si un rerun se queda
-# colgado (p. ej. WebSocket caído), el usuario pueda clicar para forzar
-# un refresco y salir del estado bloqueado. Streamlit ya encola clicks
-# durante el rerun internamente.
-st.markdown(
-    """
-    <style>
-    .stApp [data-stale="true"] button,
-    .stApp [data-stale="true"] input,
-    .stApp [data-stale="true"] [role="combobox"],
-    .stApp [data-stale="true"] .stSelectbox,
-    .stApp [data-stale="true"] .stCheckbox,
-    .stApp [data-stale="true"] .stRadio,
-    .stApp [data-stale="true"] [data-testid="stFileUploaderDropzone"] {
-        opacity: 0.45 !important;
-        cursor: progress !important;
-        transition: opacity 0.15s;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 st.title("🩺 HUC TFM Pilot")
 st.caption(
     "Demo interactiva del modelo F4 (BiT-M doble canal) + AttnMIL ternario "
@@ -113,9 +86,10 @@ with st.sidebar:
         st.success("Modelos cargados ✓")
     else:
         st.caption("Pulsa para descargar pesos desde GCS y cargar el ensemble.")
-        # Placeholder para poder reemplazar el botón por la versión
-        # deshabilitada "⏳ Cargando…" durante la carga (~25 s). El CSS
-        # de `data-stale` no marca este botón con suficiente claridad.
+        # st.empty() permite reemplazar el botón por la versión disabled
+        # "⏳ Cargando…" mientras dura la operación (~25 s). Tras la carga,
+        # st.rerun() refresca el panel a "Modelos cargados ✓" y descarta
+        # cualquier elemento residual de este branch.
         btn_slot = st.empty()
         clicked = btn_slot.button(
             "Cargar modelos desde GCS", type="primary", key="btn_load_models",
@@ -127,17 +101,8 @@ with st.sidebar:
                 disabled=True,
                 key="btn_load_models_loading",
             )
-            progress = st.progress(0.0, text="Iniciando…")
-
-            def _on_progress(done: int, total: int, msg: str) -> None:
-                progress.progress(done / total, text=msg)
-
-            t0 = time.time()
             with st.spinner("Descargando pesos y cargando modelos en GPU…"):
-                load_models(progress_cb=_on_progress)
-            progress.empty()
-            btn_slot.empty()
-            st.success(f"Cargados en {time.time() - t0:.1f} s")
+                load_models()
             st.rerun()
 
 
