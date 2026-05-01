@@ -402,7 +402,7 @@ def _per_class_metrics(cm: np.ndarray) -> dict[str, dict[str, float | int]]:
     return out
 
 
-def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
+def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
     """Heatmap 3x3 de la matriz de confusión.
 
     El degradado y el % entre paréntesis están normalizados **por columna**
@@ -410,6 +410,8 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
     donde una predicción de clase X realmente corresponde a la clase X. Es
     complementario a la tabla per-class de la derecha, que ofrece la vista
     por fila (recall + precisión + F1).
+
+    `level` se inserta en el título: "parche" (M4.7a) o "slide" (M4.7b).
     """
     col_sums = cm.sum(axis=0, keepdims=True)
     cm_norm = np.where(col_sums > 0, cm / np.maximum(col_sums, 1), 0.0)
@@ -434,7 +436,11 @@ def _confusion_heatmap(cm: np.ndarray) -> go.Figure:
         showscale=False,
     ))
     fig.update_layout(
-        title="Matriz de confusión a nivel de parche (filas: real, columnas: predicho)",
+        title=dict(
+            text=f"Matriz de confusión a nivel de {level} (filas: real, columnas: predicho)",
+            x=0.5,
+            xanchor="center",
+        ),
         xaxis=dict(title="Predicho", side="bottom", constrain="domain"),
         yaxis=dict(
             title="Real",
@@ -548,9 +554,12 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
 
     col_cm, col_table = st.columns([3, 2])
     with col_cm:
-        st.plotly_chart(_confusion_heatmap(cm), use_container_width=True)
+        st.plotly_chart(_confusion_heatmap(cm, level="parche"), use_container_width=True)
     with col_table:
-        st.markdown("**Métricas por clase**")
+        st.markdown(
+            "<div style='text-align:center;'><strong>Métricas por clase</strong></div>",
+            unsafe_allow_html=True,
+        )
         rows = []
         for name, m in metrics.items():
             rows.append({
@@ -631,9 +640,12 @@ def render_session_metrics(jobs: list) -> None:
 
     col_cm, col_table = st.columns([3, 2])
     with col_cm:
-        st.plotly_chart(_confusion_heatmap(cm), use_container_width=True)
+        st.plotly_chart(_confusion_heatmap(cm, level="slide"), use_container_width=True)
     with col_table:
-        st.markdown("**Métricas por clase**")
+        st.markdown(
+            "<div style='text-align:center;'><strong>Métricas por clase</strong></div>",
+            unsafe_allow_html=True,
+        )
         rows = []
         for name, m in metrics.items():
             rows.append({
