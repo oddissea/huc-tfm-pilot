@@ -728,100 +728,104 @@ def _render_patch_predictions(
                 if clicked_idx != st.session_state.get(sel_key, -1):
                     st.session_state[sel_key] = clicked_idx
 
-        st.markdown(
-            "**Inspeccionar parche en detalle** — *click en un parche del "
-            "mosaico para inspeccionarlo, o usa los controles abajo*"
-        )
-
-        def _nav_idx(delta: int, key: str, n_max: int) -> None:
-            """Callback on_click: corre ANTES de evaluar los widgets, por
-            eso puede modificar st.session_state[key] aunque el selectbox
-            posterior tenga ese mismo key."""
-            cur = st.session_state.get(key, -1)
-            st.session_state[key] = max(0, min(n_max - 1, cur + delta))
-
-        ctrl_cols = st.columns([1, 6, 1])
-        with ctrl_cols[0]:
-            st.button(
-                "←", key=f"prev_{sel_key}",
-                disabled=(st.session_state[sel_key] <= 0),
-                on_click=_nav_idx, args=(-1, sel_key, n),
-            )
-        with ctrl_cols[1]:
-            # El selectbox usa la MISMA key que el state principal (sel_key)
-            # para que se mantenga sincronizado con clicks del mosaico y los
-            # botones de navegación. Streamlit lee/escribe st.session_state[sel_key]
-            # automáticamente vía la key.
-            options = [-1] + list(range(n))
-            st.selectbox(
-                "Índice del parche (—  = ocultar)",
-                options=options,
-                format_func=lambda i: "—" if i == -1 else f"#{i}",
-                key=sel_key,
-                label_visibility="collapsed",
-            )
-        with ctrl_cols[2]:
-            st.button(
-                "→", key=f"next_{sel_key}",
-                disabled=(st.session_state[sel_key] >= n - 1),
-                on_click=_nav_idx, args=(1, sel_key, n),
+        @st.fragment
+        def _render_inspector():
+            """Inspector aislado: navegación con ←/→ y selectbox solo
+            rerunna este fragmento, NO redibuja el mosaico de arriba.
+            (El click sobre un parche del mosaico Plotly sí dispara un
+            rerun completo de la página por limitación de Streamlit.)"""
+            st.markdown(
+                "**Inspeccionar parche en detalle** — *click en un parche del "
+                "mosaico para inspeccionarlo, o usa los controles abajo*"
             )
 
-        idx = st.session_state[sel_key]
-        if 0 <= idx < n:
-            patch_full = np.asarray(patches_arr[idx])  # (H, W, 3) uint8 a tamaño nativo
-            pred_probs = patch_eval.get("pred_probs")
-            probs_str = ""
-            if pred_probs is not None:
-                pp = np.asarray(pred_probs)[idx]
-                probs_str = " · ".join(f"{c}={p:.3f}" for c, p in zip(CLASS_NAMES, pp))
-            pred_cls = CLASS_NAMES[int(pred_index[idx])]
-            color_hex = CLASS_COLORS[pred_cls]
+            def _nav_idx(delta: int, key: str, n_max: int) -> None:
+                cur = st.session_state.get(key, -1)
+                st.session_state[key] = max(0, min(n_max - 1, cur + delta))
 
-            # GT por parche si está disponible
-            gt_label = None
-            cats_ternary = patch_eval.get("cats_ternary")
-            if cats_ternary is not None:
-                cat = str(cats_ternary[idx])
-                if cat in CLASS_NAMES:
-                    gt_label = cat
-                elif cat == "EXCLUDED":
-                    cats_raw = patch_eval.get("cats_raw")
-                    if cats_raw is not None:
-                        gt_label = f"excluido ({str(cats_raw[idx])})"
-
-            att_val = float(attention[idx]) if attention is not None else None
-            att_rel = (att_val / float(attention.max())) if (att_val is not None and attention.max() > 0) else None
-
-            img_col, info_col = st.columns([1, 1])
-            with img_col:
-                uri = _patch_to_data_uri(patch_full)
-                st.markdown(
-                    f'<img src="{uri}" style="width:100%;border:4px solid {color_hex};'
-                    f'border-radius:6px;">'
-                    f'<div style="text-align:center;font-size:0.9rem;'
-                    f'color:#555;margin-top:6px;">parche #{idx} · '
-                    f'tamaño nativo {patch_full.shape[1]}×{patch_full.shape[0]} px</div>',
-                    unsafe_allow_html=True,
+            ctrl_cols = st.columns([1, 6, 1])
+            with ctrl_cols[0]:
+                st.button(
+                    "←", key=f"prev_{sel_key}",
+                    disabled=(st.session_state[sel_key] <= 0),
+                    on_click=_nav_idx, args=(-1, sel_key, n),
                 )
-            with info_col:
-                st.metric("Predicción F4", pred_cls)
-                if probs_str:
-                    st.caption(f"Probabilidades F4: {probs_str}")
-                if att_val is not None:
-                    delta_text = (
-                        f"{att_rel:.0%} del máximo" if att_rel is not None else None
+            with ctrl_cols[1]:
+                options = [-1] + list(range(n))
+                st.selectbox(
+                    "Índice del parche (—  = ocultar)",
+                    options=options,
+                    format_func=lambda i: "—" if i == -1 else f"#{i}",
+                    key=sel_key,
+                    label_visibility="collapsed",
+                )
+            with ctrl_cols[2]:
+                st.button(
+                    "→", key=f"next_{sel_key}",
+                    disabled=(st.session_state[sel_key] >= n - 1),
+                    on_click=_nav_idx, args=(1, sel_key, n),
+                )
+
+            idx = st.session_state[sel_key]
+            if 0 <= idx < n:
+                patch_full = np.asarray(patches_arr[idx])
+                pred_probs = patch_eval.get("pred_probs")
+                probs_str = ""
+                if pred_probs is not None:
+                    pp = np.asarray(pred_probs)[idx]
+                    probs_str = " · ".join(f"{c}={p:.3f}" for c, p in zip(CLASS_NAMES, pp))
+                pred_cls = CLASS_NAMES[int(pred_index[idx])]
+                color_hex = CLASS_COLORS[pred_cls]
+
+                gt_label = None
+                cats_ternary = patch_eval.get("cats_ternary")
+                if cats_ternary is not None:
+                    cat = str(cats_ternary[idx])
+                    if cat in CLASS_NAMES:
+                        gt_label = cat
+                    elif cat == "EXCLUDED":
+                        cats_raw = patch_eval.get("cats_raw")
+                        if cats_raw is not None:
+                            gt_label = f"excluido ({str(cats_raw[idx])})"
+
+                att_val = float(attention[idx]) if attention is not None else None
+                att_rel = (
+                    att_val / float(attention.max())
+                    if (att_val is not None and attention.max() > 0)
+                    else None
+                )
+
+                img_col, info_col = st.columns([1, 1])
+                with img_col:
+                    uri = _patch_to_data_uri(patch_full)
+                    st.markdown(
+                        f'<img src="{uri}" style="width:100%;border:4px solid {color_hex};'
+                        f'border-radius:6px;">'
+                        f'<div style="text-align:center;font-size:0.9rem;'
+                        f'color:#555;margin-top:6px;">parche #{idx} · '
+                        f'tamaño nativo {patch_full.shape[1]}×{patch_full.shape[0]} px</div>',
+                        unsafe_allow_html=True,
                     )
-                    st.metric(
-                        "Atención AttnMIL",
-                        f"{att_val:.4f}",
-                        delta=delta_text,
-                        delta_color="off",
-                    )
-                if gt_label is not None:
-                    st.metric("GT (etiqueta del H5)", gt_label)
-                pos_y, pos_x = int(positions[idx][0]), int(positions[idx][1])
-                st.caption(f"Posición en slide: y={pos_y}, x={pos_x}")
+                with info_col:
+                    st.metric("Predicción F4", pred_cls)
+                    if probs_str:
+                        st.caption(f"Probabilidades F4: {probs_str}")
+                    if att_val is not None:
+                        delta_text = (
+                            f"{att_rel:.0%} del máximo" if att_rel is not None else None
+                        )
+                        st.metric(
+                            "Atención AttnMIL",
+                            f"{att_val:.4f}",
+                            delta=delta_text,
+                            delta_color="off",
+                        )
+                    if gt_label is not None:
+                        st.metric("GT (etiqueta del H5)", gt_label)
+                    pos_y, pos_x = int(positions[idx][0]), int(positions[idx][1])
+                    st.caption(f"Posición en slide: y={pos_y}, x={pos_x}")
+
+        _render_inspector()
 
 
 def _render_patch_validation(patch_eval: dict, result: dict) -> None:
