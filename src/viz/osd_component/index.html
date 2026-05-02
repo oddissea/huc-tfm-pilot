@@ -114,8 +114,9 @@
 
       // Marcador 'ya corregido': círculo coloreado en la esquina superior
       // derecha. Visible siempre que el parche tenga corrección, sin
-      // depender del toggle. Permite ver de un vistazo qué parches ya se
-      // tocaron.
+      // depender del toggle. La clase 'corr-dot' permite a applyToggles
+      // localizarlo y actualizarlo cuando cambia o.corrected (al
+      // guardar una corrección nueva).
       if (o.corrected && CORR_COLORS[o.corrected]) {
         const dot = document.createElementNS(SVG_NS, "circle");
         dot.setAttribute("cx", "0.85"); dot.setAttribute("cy", "0.15");
@@ -123,6 +124,7 @@
         dot.setAttribute("fill", CORR_COLORS[o.corrected]);
         dot.setAttribute("stroke", "#fff");
         dot.setAttribute("stroke-width", "0.025");
+        dot.setAttribute("class", "corr-dot");
         svg.appendChild(dot);
       }
 
@@ -372,14 +374,49 @@
         if (fr) {
           fr.style.display = showAtt ? "" : "none";
         }
-        // selRect amarillo del seleccionado: visible solo si está
-        // seleccionado Y bordes ON.
         const div = patchDivs.get(o.idx);
         if (div) {
+          // selRect amarillo del seleccionado: visible solo si está
+          // seleccionado Y bordes ON.
           const sel = div.querySelector("rect.sel-marker");
           if (sel) {
             sel.style.display = (isSelected && showSelBorders) ? "block" : "none";
           }
+
+          // Círculo de 'corregido': sincronizar con o.corrected. Crear
+          // si hay corrección nueva, actualizar color si la corrección
+          // cambió de etiqueta (ej. ADE→NOR), borrar si se revirtió
+          // (caso futuro de delete-correction). Permite que el círculo
+          // aparezca sin recargar el iframe al guardar una corrección.
+          const svg = div.querySelector("svg");
+          let dot = svg ? svg.querySelector("circle.corr-dot") : null;
+          if (o.corrected && CORR_COLORS[o.corrected]) {
+            if (!dot && svg) {
+              dot = document.createElementNS(SVG_NS, "circle");
+              dot.setAttribute("cx", "0.85"); dot.setAttribute("cy", "0.15");
+              dot.setAttribute("r", "0.10");
+              dot.setAttribute("stroke", "#fff");
+              dot.setAttribute("stroke-width", "0.025");
+              dot.setAttribute("class", "corr-dot");
+              svg.appendChild(dot);
+            }
+            if (dot) dot.setAttribute("fill", CORR_COLORS[o.corrected]);
+          } else if (dot) {
+            dot.remove();
+          }
+
+          // Refrescar el title (hover) para reflejar la corrección
+          // actual sin recargar el iframe.
+          let tip = `parche #${o.idx}`;
+          if (o.cls) tip += `\npredicción F4: ${o.cls}`;
+          if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
+          if (o.att !== undefined) {
+            const pct = (o.att_rel * 100).toFixed(0);
+            tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
+          }
+          if (o.corrected) tip += `\n✓ corregido como: ${o.corrected}`;
+          if (o.pos) tip += `\nposición (y,x): (${o.pos[0]}, ${o.pos[1]})`;
+          div.title = tip;
         }
       }
     }
@@ -390,6 +427,12 @@
         setupViewer(args);
         initialized = true;
       } else {
+        // CRÍTICO: refrescar overlaysData con los datos más recientes.
+        // Si el patólogo guarda una corrección, el rerun envía un
+        // overlays con o.corrected actualizado para ese parche; sin
+        // este refresh applyToggles seguiría leyendo el array antiguo
+        // y el círculo no se materializaría.
+        if (args.overlays) overlaysData = args.overlays;
         applyToggles(args);
       }
       const externallySelected = args.selected_idx;
