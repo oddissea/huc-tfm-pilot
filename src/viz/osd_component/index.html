@@ -8,7 +8,8 @@
     #viewer { width: 100%; background: transparent; border-radius: 6px; }
     .osd-patch {
       box-sizing: border-box;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
     }
     .osd-patch svg { display: block; width: 100%; height: 100%; pointer-events: none; }
     .osd-patch.osd-selected svg rect.sel-marker { display: block; }
@@ -152,6 +153,23 @@
       div.title = tip;
       div.appendChild(svg);
       patchDivs.set(o.idx, div);
+
+      // Click directo en el div: con pointer-events:auto el div recibe
+      // los pointer events, así que el canvas-click de OSD ya no se
+      // dispara sobre los overlays (solo sobre zonas vacías). Manejamos
+      // el click aquí mismo y enviamos el idx a Streamlit.
+      // stopPropagation para que OSD no interprete el click como inicio
+      // de un drag de pan.
+      div.addEventListener("click", function(ev) {
+        ev.stopPropagation();
+        updateSelection(o.idx);
+        console.log("[osd_viewer] div-click", o.idx);
+        sendStreamlit("streamlit:setComponentValue", {
+          value: { idx: o.idx, ts: Date.now() },
+          dataType: "json",
+        });
+      });
+
       return div;
     }
 
@@ -322,11 +340,27 @@
     function applyToggles(args) {
       const showPred = args.show_predictions !== false;
       const showAtt = args.show_attention === true;
-      for (const r of strokeRects.values()) {
-        r.style.display = showPred ? "" : "none";
-      }
-      for (const r of fillRects.values()) {
-        r.style.display = showAtt ? "" : "none";
+      // CRÍTICO: actualizar viewCorrected también al refrescar toggles.
+      // Sin esto, cambiar el toggle 'ver correcciones aplicadas' no
+      // tenía efecto porque applyToggles solo cambiaba show_pred / show_att
+      // sin recalcular el strokeColor de los strokeRects existentes.
+      viewCorrected = args.view_corrected === true;
+
+      for (const o of overlaysData) {
+        const sr = strokeRects.get(o.idx);
+        if (sr) {
+          // Recalcular el color del borde según el toggle actual.
+          let strokeColor = o.color;
+          if (viewCorrected && o.corrected && CORR_COLORS[o.corrected]) {
+            strokeColor = CORR_COLORS[o.corrected];
+          }
+          sr.setAttribute("stroke", strokeColor);
+          sr.style.display = showPred ? "" : "none";
+        }
+        const fr = fillRects.get(o.idx);
+        if (fr) {
+          fr.style.display = showAtt ? "" : "none";
+        }
       }
     }
 
