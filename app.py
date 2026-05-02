@@ -299,10 +299,23 @@ def _render_queue():
     except Exception:
         selected_rows = []
 
+    # Botones de acción debajo de la tabla. La descarga CSV está siempre
+    # disponible cuando hay filas; el borrado sólo aparece si hay
+    # filas seleccionadas.
+    col_dl, col_del = st.columns([1, 5])
+    with col_dl:
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Descargar CSV",
+            data=csv_bytes,
+            file_name=f"cola_huc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            key="btn_dl_csv",
+        )
+
     if selected_rows:
         n_sel = len(selected_rows)
-        col_btn, _ = st.columns([1, 5])
-        with col_btn:
+        with col_del:
             if st.button(
                 f"🗑️ Eliminar {n_sel} seleccionado{'s' if n_sel > 1 else ''}",
                 key="btn_delete_selected",
