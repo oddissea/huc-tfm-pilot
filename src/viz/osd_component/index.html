@@ -172,7 +172,41 @@
         }
         applyToggles(window.__lastArgs || {});
         if (window.__pendingSelected != null) updateSelection(window.__pendingSelected);
+
+        // Cuando OSD inicializa, el iframe puede estar todavía ajustándose
+        // a su altura final (Streamlit aplica setFrameHeight asíncronamente).
+        // OSD ve un contenedor pequeño y no renderiza bien hasta que el
+        // user redimensiona la ventana. Forzamos reflow explícito a los
+        // 100ms y 500ms para cubrir tanto el caso rápido como el lento.
+        const forceReflow = () => {
+          try {
+            viewer.viewport.resize();
+            viewer.forceRedraw();
+          } catch (e) {
+            console.warn("[osd_viewer] forceReflow failed:", e);
+          }
+        };
+        setTimeout(forceReflow, 100);
+        setTimeout(forceReflow, 500);
       });
+
+      // ResizeObserver: si el iframe cambia de tamaño en cualquier momento
+      // (incluido el ajuste inicial de Streamlit), OSD recalcula viewport
+      // y redraw. Esto resuelve el bug 'el visor solo aparece tras
+      // redimensionar la ventana' — al ser automático, no hay que esperar
+      // a que el user haga el resize manual.
+      try {
+        const ro = new ResizeObserver(() => {
+          if (viewer && viewer.viewport) {
+            viewer.viewport.resize();
+            viewer.forceRedraw();
+          }
+        });
+        ro.observe(document.body);
+        ro.observe(document.getElementById("viewer"));
+      } catch (e) {
+        console.warn("[osd_viewer] ResizeObserver unavailable:", e);
+      }
 
       // canvas-click: dispara SIEMPRE para clicks limpios sobre el visor,
       // tanto sobre tile como sobre overlay. event.quick=true significa
