@@ -1097,6 +1097,13 @@ def _render_corrections_panel(
         # source-of-truth — render_slide_detail lee de ahí también, así
         # el visor recoge el valor sin depender del orden de render.
         widget_key = f"corr_idx_{job.job_id}"
+        # Streamlit no permite modificar session_state[widget_key] DESPUÉS
+        # de instanciar el widget. Para que el botón 'siguiente más
+        # incierto' pueda cambiar el valor, lo encolamos en una key
+        # auxiliar 'pending_key' y lo aplicamos AQUÍ antes del widget.
+        pending_key = f"corr_pending_target_{job.job_id}"
+        if pending_key in st.session_state:
+            st.session_state[widget_key] = st.session_state.pop(pending_key)
         if widget_key not in st.session_state:
             st.session_state[widget_key] = int(order[0]) if len(order) > 0 else 0
 
@@ -1140,7 +1147,10 @@ def _render_corrections_panel(
                 use_container_width=True,
                 help="Salta los parches que ya tienen corrección registrada.",
             ):
-                st.session_state[widget_key] = next_uncertain
+                # Encolamos en pending_key — al inicio del próximo rerun,
+                # antes de instanciar el number_input, el código de
+                # arriba aplicará este valor al widget_key.
+                st.session_state[pending_key] = next_uncertain
                 st.rerun()
 
         # Toggle: ver el visor con la predicción del modelo (default)
