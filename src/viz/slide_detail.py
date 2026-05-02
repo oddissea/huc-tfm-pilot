@@ -1194,52 +1194,64 @@ def _render_corrections_panel(
             caption_text += f"\n\n✓ **Corregido a {existing_corr}**"
         st.caption(caption_text)
 
-        # CSS para colorear los botones del segmented_control de etiquetas
-        # con el color de cada clase. El selector :has(label:nth-of-type(6))
-        # apunta solo al segmented_control con 6 opciones (las CORRECTION_LABELS),
-        # NO al de 2 opciones de modo (Atención/Predicciones) que también
-        # vive en la página. Streamlit no expone API nativa para colorear
-        # opciones individuales; este es el approach más estable disponible.
-        # ADE=naranja, NOR=verde, CAR=azul, HIP/ART/EXCLUDED=gris.
-        st.markdown("""
-        <style>
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label {
-            border-width: 2px !important;
-            font-weight: 600 !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(1) {
-            border-color: #ff7f0e !important; color: #ff7f0e !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(2) {
-            border-color: #2ca02c !important; color: #2ca02c !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(3) {
-            border-color: #1f77b4 !important; color: #1f77b4 !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(n+4) {
-            border-color: #888 !important; color: #888 !important;
-        }
-        /* Cuando el botón está seleccionado, fondo del color de su clase */
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(1):has(input:checked) {
-            background-color: rgba(255, 127, 14, 0.25) !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(2):has(input:checked) {
-            background-color: rgba(46, 160, 46, 0.25) !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(3):has(input:checked) {
-            background-color: rgba(31, 119, 180, 0.25) !important;
-        }
-        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(n+4):has(input:checked) {
-            background-color: rgba(136, 136, 136, 0.25) !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
         # Selector de clase. segmented_control para que sea un click directo.
         new_label = st.segmented_control(
             "Etiqueta corregida",
             options=list(CORRECTION_LABELS),
             key=f"corr_label_{job.job_id}",
+        )
+
+        # Coloreado de los botones por contenido de texto. Streamlit no
+        # expone API nativa y los selectores CSS son frágiles entre
+        # versiones, así que inyectamos un iframe invisible (height=0)
+        # con un script que recorre window.parent.document y aplica
+        # estilos a los botones cuyo texto coincide con cada etiqueta.
+        # MutationObserver re-aplica los estilos si Streamlit re-renderiza
+        # el segmented_control (lo hace en cada rerun).
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
+            <script>
+            const COLORS = {
+              "ADE": "#ff7f0e", "NOR": "#2ca02c", "CAR": "#1f77b4",
+              "HIP": "#888888", "ART": "#888888", "EXCLUDED": "#888888"
+            };
+            const FILLS = {
+              "ADE": "rgba(255,127,14,0.25)", "NOR": "rgba(46,160,46,0.25)",
+              "CAR": "rgba(31,119,180,0.25)",
+              "HIP": "rgba(136,136,136,0.25)", "ART": "rgba(136,136,136,0.25)",
+              "EXCLUDED": "rgba(136,136,136,0.25)"
+            };
+            function paint() {
+              const doc = window.parent.document;
+              // Buscamos botones/labels cuyo texto coincida exactamente con
+              // una de las CORRECTION_LABELS. Evitamos colorear cosas
+              // ajenas (ej. matrices con celdas que dicen "ADE").
+              doc.querySelectorAll('button, label').forEach(el => {
+                const txt = (el.textContent || '').trim();
+                if (COLORS[txt] && txt.length <= 10) {
+                  el.style.borderColor = COLORS[txt];
+                  el.style.color = COLORS[txt];
+                  el.style.borderWidth = '2px';
+                  el.style.borderStyle = 'solid';
+                  el.style.fontWeight = '600';
+                  // Si está seleccionado (BaseWeb usa aria-checked o input:checked)
+                  const checkedInput = el.querySelector('input:checked');
+                  const ariaChecked = el.getAttribute('aria-checked') === 'true';
+                  if (checkedInput || ariaChecked) {
+                    el.style.backgroundColor = FILLS[txt];
+                  } else {
+                    el.style.backgroundColor = '';
+                  }
+                }
+              });
+            }
+            paint();
+            // Re-pintar cada 300ms — barato y atrapa cambios tras click.
+            setInterval(paint, 300);
+            </script>
+            """,
+            height=0,
         )
 
         comment = st.text_input(
