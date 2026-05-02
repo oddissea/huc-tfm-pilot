@@ -1207,7 +1207,7 @@ def _render_corrections_panel(
             st.info("Teclea un `#índice` o pulsa **Siguiente más incierto** para empezar a corregir.")
             summary = summarize_corrections(job.job_dir)
             if summary["n_total"] > 0:
-                _render_corrections_summary(summary)
+                _render_corrections_summary(summary, job)
             return
 
         # Info del parche seleccionado: replica el contenido del hover
@@ -1340,11 +1340,15 @@ def _render_corrections_panel(
         # Resumen de correcciones de este slide (con parche seleccionado).
         summary = summarize_corrections(job.job_dir)
         if summary["n_total"] > 0:
-            _render_corrections_summary(summary)
+            _render_corrections_summary(summary, job)
 
 
-def _render_corrections_summary(summary: dict) -> None:
-    """Resumen del panel de correcciones: 3 métricas + breakdown por etiqueta.
+_DELETE_CONFIRMATION_PHRASE = "borrar todas las correcciones"
+
+
+def _render_corrections_summary(summary: dict, job: "Job") -> None:
+    """Resumen del panel de correcciones: 3 métricas + breakdown por etiqueta
+    + expander con botón de borrado masivo (con confirmación por frase).
 
     Dividido entre ternarias (ADE/NOR/CAR) que entran al fine-tune del head,
     y no-ternarias (HIP/ART/EXCLUDED) que se persisten como dataset latente
@@ -1374,6 +1378,35 @@ def _render_corrections_summary(summary: dict) -> None:
             f"**{c}**: {n}" for c, n in sorted(summary["by_label"].items())
         )
         st.caption(f"Por etiqueta: {breakdown}")
+
+    # Borrado masivo de correcciones del slide. Confirmación por frase
+    # exacta (no por timeout) para minimizar el riesgo de borrar
+    # accidentalmente trabajo del patólogo.
+    with st.expander("🗑️ Borrar todas las correcciones de este portaobjetos"):
+        st.warning(
+            "Esta acción borra el `corrections.jsonl` del portaobjetos. "
+            "**Es irreversible.** Las correcciones desaparecen de la "
+            "vista, los círculos del visor, el resumen y el JSONL en disco."
+        )
+        confirm = st.text_input(
+            f"Para confirmar, escribe exactamente: `{_DELETE_CONFIRMATION_PHRASE}`",
+            key=f"corr_delete_confirm_{job.job_id}",
+            placeholder=_DELETE_CONFIRMATION_PHRASE,
+        )
+        match = (confirm or "").strip().lower() == _DELETE_CONFIRMATION_PHRASE
+        if st.button(
+            "🗑️ Borrar definitivamente",
+            key=f"corr_delete_btn_{job.job_id}",
+            disabled=not match,
+            type="primary",
+        ):
+            corrections_path = job.job_dir / "corrections.jsonl"
+            if corrections_path.exists():
+                corrections_path.unlink()
+            st.success(
+                f"Correcciones borradas: se eliminó `{corrections_path.name}`."
+            )
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
