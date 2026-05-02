@@ -225,12 +225,11 @@
         // user redimensiona la ventana. Forzamos reflow explícito a los
         // 100ms y 500ms para cubrir tanto el caso rápido como el lento.
         const forceReflow = () => {
+          if (!viewer || !viewer.world || viewer.world.getItemCount() === 0) return;
           try {
             viewer.viewport.resize();
             viewer.forceRedraw();
-          } catch (e) {
-            console.warn("[osd_viewer] forceReflow failed:", e);
-          }
+          } catch (e) { /* ignore transient errors */ }
         };
         setTimeout(forceReflow, 100);
         setTimeout(forceReflow, 500);
@@ -243,9 +242,15 @@
       // a que el user haga el resize manual.
       try {
         const ro = new ResizeObserver(() => {
-          if (viewer && viewer.viewport) {
-            viewer.viewport.resize();
-            viewer.forceRedraw();
+          // Guard: viewer.viewport.resize() crashea con
+          // 'Cannot read properties of undefined (reading 'x')' si
+          // se llama antes de que el world tenga items cargados.
+          if (viewer && viewer.viewport && viewer.world &&
+              viewer.world.getItemCount() > 0) {
+            try {
+              viewer.viewport.resize();
+              viewer.forceRedraw();
+            } catch (e) { /* ignore transient resize errors */ }
           }
         });
         ro.observe(document.body);
@@ -276,12 +281,41 @@
     }
 
     function updateSelection(idx) {
+      // Quitamos la marca del anterior. Manipulamos style.display
+      // directamente porque el style inline tiene mayor prioridad que
+      // las reglas CSS — sin esto, el .osd-selected del CSS no podría
+      // sobrescribir el `display:none` inicial que ponemos al crear el rect.
       if (selectedIdx != null && patchDivs.has(selectedIdx)) {
-        patchDivs.get(selectedIdx).classList.remove("osd-selected");
+        const prev = patchDivs.get(selectedIdx);
+        prev.classList.remove("osd-selected");
+        const oldSel = prev.querySelector("rect.sel-marker");
+        if (oldSel) oldSel.style.display = "none";
       }
       selectedIdx = idx;
       if (idx != null && patchDivs.has(idx)) {
-        patchDivs.get(idx).classList.add("osd-selected");
+        const cur = patchDivs.get(idx);
+        cur.classList.add("osd-selected");
+        const newSel = cur.querySelector("rect.sel-marker");
+        if (newSel) newSel.style.display = "block";
+      }
+
+      // Pan + zoom al parche seleccionado para que el patólogo lo vea
+      // inmediatamente sin tener que buscar. Zoom 3x: detalle moderado
+      // con algo de contexto. Solo si el viewer está listo y conocemos
+      // las coordenadas del overlay.
+      if (viewer && viewer.world && viewer.world.getItemCount() > 0 && idx != null) {
+        const o = overlaysData.find(x => x.idx === idx);
+        if (o) {
+          try {
+            const target = viewer.viewport.imageToViewportCoordinates(
+              o.x + o.size / 2, o.y + o.size / 2
+            );
+            viewer.viewport.zoomTo(3.0, target, true);
+            viewer.viewport.panTo(target, true);
+          } catch (e) {
+            console.warn("[osd_viewer] panTo failed:", e);
+          }
+        }
       }
     }
 
