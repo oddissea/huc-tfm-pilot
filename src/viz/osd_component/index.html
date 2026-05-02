@@ -317,10 +317,12 @@
         if (newSel) newSel.style.display = "block";
       }
 
-      // Pan + zoom al parche seleccionado para que el patólogo lo vea
-      // inmediatamente sin tener que buscar. Zoom 3x: detalle moderado
-      // con algo de contexto. Solo si el viewer está listo y conocemos
-      // las coordenadas del overlay.
+      // Pan + (zoom condicional) al parche seleccionado.
+      // Si el patólogo todavía está cerca del zoom inicial (vista
+      // panorámica), aplicamos zoom 3x para destacar el parche.
+      // Si ya ha hecho zoom manual (está examinando algo en detalle),
+      // solo paneamos sin tocar el zoom — preservamos su contexto.
+      // Threshold: zoom_actual < 1.5 × home_zoom = "sin zoom".
       if (viewer && viewer.world && viewer.world.getItemCount() > 0 && idx != null) {
         const o = overlaysData.find(x => x.idx === idx);
         if (o) {
@@ -328,7 +330,11 @@
             const target = viewer.viewport.imageToViewportCoordinates(
               o.x + o.size / 2, o.y + o.size / 2
             );
-            viewer.viewport.zoomTo(3.0, target, true);
+            const homeZoom = viewer.viewport.getHomeZoom();
+            const currentZoom = viewer.viewport.getZoom();
+            if (currentZoom < homeZoom * 1.5) {
+              viewer.viewport.zoomTo(homeZoom * 3.0, target, true);
+            }
             viewer.viewport.panTo(target, true);
           } catch (e) {
             console.warn("[osd_viewer] panTo failed:", e);
