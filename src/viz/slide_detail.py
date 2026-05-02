@@ -1013,27 +1013,60 @@ def _render_corrections_panel(
             order = np.arange(n_patches)
             confidences = np.full(n_patches, np.nan)
 
-        # Selectbox con opciones formateadas. Mostramos hasta 200 para
-        # no saturar el render — los más inciertos van primero.
-        max_options = min(200, n_patches)
-        labels = []
-        for i in order[:max_options]:
-            i_int = int(i)
-            pred_str = CLASS_NAMES[pred_index[i_int]]
-            conf = confidences[i_int]
-            conf_str = f"{conf:.0%}" if not np.isnan(conf) else "?"
-            att = attention[i_int] if i_int < len(attention) else 0.0
-            labels.append(f"#{i_int} · {pred_str} ({conf_str}) · α={att:.4f}")
+        # Input numérico directo: el patólogo lee el #idx en el hover
+        # del visor y lo teclea aquí. Más rápido que un combo de N
+        # opciones ordenadas, especialmente cuando el N es grande.
+        # Default = el parche más incierto (active learning) la primera
+        # vez que se abre el panel, o el último editado en sucesivos
+        # reruns.
+        target_key = f"corr_target_{job.job_id}"
+        if target_key not in st.session_state:
+            st.session_state[target_key] = int(order[0]) if len(order) > 0 else 0
 
-        sel_label = st.selectbox(
-            f"Parche a corregir (ordenados por incertidumbre · top {max_options} de {n_patches})",
-            options=labels,
-            key=f"corr_sel_{job.job_id}",
+        col_idx, col_next = st.columns([2, 1])
+        with col_idx:
+            patch_idx = int(st.number_input(
+                f"Parche a corregir (0–{n_patches - 1})",
+                min_value=0, max_value=n_patches - 1, step=1,
+                value=int(st.session_state[target_key]),
+                key=f"corr_idx_{job.job_id}",
+                help="Teclea el #índice que ves en el hover del visor.",
+            ))
+            st.session_state[target_key] = patch_idx
+        with col_next:
+            # Saltar al siguiente más incierto que NO sea el actual.
+            next_uncertain = next(
+                (int(i) for i in order if int(i) != patch_idx),
+                int(order[0]) if len(order) > 0 else 0,
+            )
+            st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer vertical
+            if st.button(
+                f"💡 Siguiente más incierto (#{next_uncertain})",
+                key=f"corr_next_{job.job_id}",
+                use_container_width=True,
+            ):
+                st.session_state[target_key] = next_uncertain
+                st.rerun()
+
+        # Info del parche seleccionado: replica el contenido del hover
+        # del visor para que el patólogo confirme que va a corregir el
+        # parche correcto.
+        pred_str_sel = CLASS_NAMES[int(pred_index[patch_idx])]
+        att_sel = float(attention[patch_idx]) if patch_idx < len(attention) else 0.0
+        if patch_probs is not None:
+            probs_sel = patch_probs[patch_idx]
+            probs_str = " · ".join(
+                f"{c}={probs_sel[i]:.3f}" for i, c in enumerate(CLASS_NAMES)
+            )
+            conf_sel = float(probs_sel.max())
+            conf_str_sel = f"{conf_sel:.0%}"
+        else:
+            probs_str = "?"
+            conf_str_sel = "?"
+        st.caption(
+            f"**#{patch_idx}** · predicción F4: **{pred_str_sel}** "
+            f"({conf_str_sel}) · probs: {probs_str} · atención: {att_sel:.4f}"
         )
-        if sel_label is None:
-            return
-        sel_pos = labels.index(sel_label)
-        patch_idx = int(order[sel_pos])
 
         # Selector de clase. segmented_control para que sea un click directo.
         new_label = st.segmented_control(
