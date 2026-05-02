@@ -206,6 +206,45 @@ class JobManager:
                 shutil.rmtree(job_dir, ignore_errors=True)
                 logger.info("Borrado job %s", job_id[:8])
 
+    def prune(self, max_age_hours: float = 24.0) -> dict:
+        """Limpieza periódica de la cola (M4.6 — TTL).
+
+        Dos pasadas:
+        1. Borra job_dirs en DONE/FAILED con `updated_at` más viejo que
+           `max_age_hours`. Los jobs activos (QUEUED/PROCESSING/...) nunca
+           se tocan, sin importar su edad — son responsabilidad del worker.
+        2. Borra cualquier `raw.*` huérfano en jobs DONE/FAILED (no debería
+           existir post-M4.6 porque _do_preprocess hace unlink, pero esto
+           cubre estados heredados o casos donde el unlink falló).
+
+        Devuelve dict con contadores para logging.
+        """
+        now = time.time()
+        cutoff = now - max_age_hours * 3600
+        pruned_dirs = 0
+        pruned_raws = 0
+        with self._lock:
+            for job in self._list_unlocked():
+                terminal = job.status in (JobStatus.DONE, JobStatus.FAILED)
+                if not terminal:
+                    continue
+                if job.updated_at < cutoff:
+                    shutil.rmtree(job.job_dir, ignore_errors=True)
+                    pruned_dirs += 1
+                    continue
+                # job terminal todavía dentro del TTL → al menos asegurar
+                # que no haya raw residual
+                if job.raw_path.exists():
+                    try:
+                        job.raw_path.unlink()
+                        pruned_raws += 1
+                    except OSError:
+                        logger.warning(
+                            "prune: no pude borrar raw huérfano en %s",
+                            job.short_id,
+                        )
+        return {"pruned_dirs": pruned_dirs, "pruned_raws": pruned_raws}
+
     # ------------------------------------------------------------------
     # Lectura
     # ------------------------------------------------------------------

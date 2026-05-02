@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 1.0
 
+# TTL de la cola (M4.6): cada cuánto invocar manager.prune() y umbral de
+# edad para borrar job_dirs DONE/FAILED. 24 h es generoso — la cola se
+# usa "online" durante una sesión; 24 h cubre uso de un día sin perder
+# resultados que el patólogo todavía pudiera querer ver.
+PRUNE_INTERVAL_SECONDS = 300.0  # 5 min
+TTL_HOURS = 24.0
+
 # Mapeo de etiquetas patch-level del H5 a clases ternarias (ADE/NOR/CAR).
 # TUM se renombró a CAR en la memoria del TFM (sesión #36); el código
 # interno y los H5 conservan "TUM". HIP (hiperplasia) y ART (artefacto)
@@ -259,9 +266,25 @@ def _do_inference(manager: JobManager, job: Job) -> None:
 
 def _worker_loop() -> None:
     manager = get_manager()
-    logger.info("Worker iniciado (poll=%.1fs)", POLL_INTERVAL)
+    logger.info("Worker iniciado (poll=%.1fs, prune=%.0fs)", POLL_INTERVAL, PRUNE_INTERVAL_SECONDS)
+    last_prune = time.time()
 
     while not _stop_event.is_set():
+        # TTL prune periódico — al principio del loop para que ocurra
+        # incluso en ciclos con `continue` que se saltan el sleep.
+        now = time.time()
+        if now - last_prune > PRUNE_INTERVAL_SECONDS:
+            try:
+                summary = manager.prune(max_age_hours=TTL_HOURS)
+                if summary["pruned_dirs"] or summary["pruned_raws"]:
+                    logger.info(
+                        "TTL prune: %d job_dirs + %d raws huérfanos eliminados",
+                        summary["pruned_dirs"], summary["pruned_raws"],
+                    )
+            except Exception:
+                logger.exception("TTL prune falló")
+            last_prune = now
+
         # Prioridad 1: avanzar inferencias si los modelos están listos
         if try_get_models() is not None:
             job = manager.pop_next_ready_for_inference()
