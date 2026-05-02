@@ -1092,23 +1092,19 @@ def _render_corrections_panel(
             order = np.arange(n_patches)
             confidences = np.full(n_patches, np.nan)
 
-        # Input numérico directo: el patólogo lee el #idx en el hover
-        # del visor y lo teclea aquí. Una sola key (la del widget) es
-        # source-of-truth — render_slide_detail lee de ahí también, así
-        # el visor recoge el valor sin depender del orden de render.
+        # Input numérico: el patólogo lee el #idx en el hover del visor
+        # y lo teclea aquí. Arranca vacío (placeholder '—') para no
+        # confundir al patólogo con un parche pre-seleccionado que no
+        # ha pedido. El visor solo destaca y centra cuando hay valor.
         widget_key = f"corr_idx_{job.job_id}"
-        # Streamlit no permite modificar session_state[widget_key] DESPUÉS
-        # de instanciar el widget. Para que el botón 'siguiente más
-        # incierto' pueda cambiar el valor, lo encolamos en una key
-        # auxiliar 'pending_key' y lo aplicamos AQUÍ antes del widget.
         pending_key = f"corr_pending_target_{job.job_id}"
-        if pending_key in st.session_state:
-            st.session_state[widget_key] = st.session_state.pop(pending_key)
-        if widget_key not in st.session_state:
-            st.session_state[widget_key] = int(order[0]) if len(order) > 0 else 0
+        # NOTA: la aplicación pending_key → widget_key se hace en
+        # render_slide_detail (antes del visor) para evitar
+        # desincronización visor↔combo. Aquí solo escribimos en
+        # pending_key desde el botón 'siguiente más incierto'.
 
         # Set de parches ya corregidos — para excluirlos del cálculo del
-        # 'siguiente más incierto' y para mostrar el toggle informativo.
+        # 'siguiente más incierto'.
         corrected_idxs = {
             int(c.patch_idx) for c in list_corrections(job.job_dir)
         }
@@ -1116,21 +1112,26 @@ def _render_corrections_panel(
         st.markdown(f"**Parche a corregir** (0–{n_patches - 1})")
         col_idx, col_next = st.columns([2, 1])
         with col_idx:
-            # Sin `value=` — la key controla a través de session_state.
-            patch_idx = int(st.number_input(
+            raw_idx = st.number_input(
                 "Parche a corregir",
                 min_value=0, max_value=n_patches - 1, step=1,
+                value=None,  # arranca vacío (placeholder visible)
                 key=widget_key,
-                help="Teclea el #índice que ves en el hover del visor.",
+                help="Teclea el #índice que ves en el hover del visor o pulsa 'Siguiente más incierto'.",
+                placeholder="—",
                 label_visibility="collapsed",
-            ))
+            )
+        patch_idx: int | None = int(raw_idx) if raw_idx is not None else None
+
         with col_next:
-            # Saltar al siguiente parche en el ranking de incertidumbre
-            # que NO esté ya corregido. Si todos los del ranking están
-            # corregidos (caso saturado), usamos el siguiente del ranking
-            # ignorando el filtro.
+            # next_uncertain: primer parche no corregido del ranking.
+            # Si patch_idx existe y está en el ranking, partimos de él
+            # para avanzar. Si no, partimos del principio (más incierto).
             order_list = [int(x) for x in order]
-            cur_pos = order_list.index(patch_idx) if patch_idx in order_list else -1
+            if patch_idx is not None and patch_idx in order_list:
+                cur_pos = order_list.index(patch_idx)
+            else:
+                cur_pos = -1  # arrancar antes del primero → primero es +1
             next_uncertain = None
             for offset in range(1, len(order_list) + 1):
                 cand = order_list[(cur_pos + offset) % len(order_list)]
@@ -1138,7 +1139,6 @@ def _render_corrections_panel(
                     next_uncertain = cand
                     break
             if next_uncertain is None:
-                # Todos corregidos: simplemente el siguiente del ranking.
                 next_uncertain = order_list[(cur_pos + 1) % len(order_list)] if order_list else 0
 
             if st.button(
@@ -1147,22 +1147,26 @@ def _render_corrections_panel(
                 use_container_width=True,
                 help="Salta los parches que ya tienen corrección registrada.",
             ):
-                # Encolamos en pending_key — al inicio del próximo rerun,
-                # antes de instanciar el number_input, el código de
-                # arriba aplicará este valor al widget_key.
                 st.session_state[pending_key] = next_uncertain
                 st.rerun()
 
         # Toggle: ver el visor con la predicción del modelo (default)
-        # vs con las correcciones aplicadas (los parches corregidos
-        # pasan a tener el borde del color de la etiqueta corregida).
-        # El círculo de la esquina sigue visible en ambos modos.
+        # vs con las correcciones aplicadas. Disponible siempre.
         st.toggle(
             "🎨 Mostrar correcciones aplicadas en el visor",
             key=f"view_corrected_{job.job_id}",
             help="OFF: bordes con la predicción del modelo (color por clase F4). "
                  "ON: bordes con la etiqueta corregida (donde la haya).",
         )
+
+        # Sin parche seleccionado: pista para empezar + saltamos a
+        # renderizar el resumen al final (sin etiquetar / guardar).
+        if patch_idx is None:
+            st.info("Teclea un `#índice` o pulsa **Siguiente más incierto** para empezar a corregir.")
+            summary = summarize_corrections(job.job_dir)
+            if summary["n_total"] > 0:
+                _render_corrections_summary(summary)
+            return
 
         # Info del parche seleccionado: replica el contenido del hover
         # del visor para que el patólogo confirme que va a corregir el
@@ -1291,37 +1295,43 @@ def _render_corrections_panel(
             if new_label is None:
                 st.caption("Selecciona una etiqueta para activar el guardado.")
 
-        # Resumen de correcciones de este slide.
-        # Dividimos entre ternarias (ADE/NOR/CAR) — que entrarán al fine-tune
-        # del head — y no-ternarias (HIP/ART/EXCLUDED) — persistidas como
-        # dataset latente para modelos futuros (cuaternario con HIP) o como
-        # filtro de calidad. Ver docs/deployment/MEJORA_CON_CORRECCIONES.md.
+        # Resumen de correcciones de este slide (con parche seleccionado).
         summary = summarize_corrections(job.job_dir)
         if summary["n_total"] > 0:
-            ternary = sum(
-                summary["by_label"].get(c, 0) for c in ("ADE", "NOR", "CAR")
-            )
-            non_ternary = sum(
-                summary["by_label"].get(c, 0) for c in ("HIP", "ART", "EXCLUDED")
-            )
-            st.markdown("**Correcciones registradas para este portaobjetos:**")
-            cols = st.columns(3)
-            cols[0].metric("Parches únicos", summary["n_unique_patches"])
-            cols[1].metric(
-                "Ternarias (ADE/NOR/CAR)", ternary,
-                help="Estas correcciones entrarán al fine-tune del head ternario.",
-            )
-            cols[2].metric(
-                "No ternarias (HIP/ART/EXCLUDED)", non_ternary,
-                help="Persistidas como dataset latente — útiles para modelos "
-                     "con más clases o como filtro de calidad. No entran al "
-                     "fine-tune ternario actual.",
-            )
-            if summary["by_label"]:
-                breakdown = " · ".join(
-                    f"**{c}**: {n}" for c, n in sorted(summary["by_label"].items())
-                )
-                st.caption(f"Por etiqueta: {breakdown}")
+            _render_corrections_summary(summary)
+
+
+def _render_corrections_summary(summary: dict) -> None:
+    """Resumen del panel de correcciones: 3 métricas + breakdown por etiqueta.
+
+    Dividido entre ternarias (ADE/NOR/CAR) que entran al fine-tune del head,
+    y no-ternarias (HIP/ART/EXCLUDED) que se persisten como dataset latente
+    para modelos cuaternarios o filtro de calidad.
+    """
+    ternary = sum(
+        summary["by_label"].get(c, 0) for c in ("ADE", "NOR", "CAR")
+    )
+    non_ternary = sum(
+        summary["by_label"].get(c, 0) for c in ("HIP", "ART", "EXCLUDED")
+    )
+    st.markdown("**Correcciones registradas para este portaobjetos:**")
+    cols = st.columns(3)
+    cols[0].metric("Parches únicos", summary["n_unique_patches"])
+    cols[1].metric(
+        "Ternarias (ADE/NOR/CAR)", ternary,
+        help="Estas correcciones entrarán al fine-tune del head ternario.",
+    )
+    cols[2].metric(
+        "No ternarias (HIP/ART/EXCLUDED)", non_ternary,
+        help="Persistidas como dataset latente — útiles para modelos "
+             "con más clases o como filtro de calidad. No entran al "
+             "fine-tune ternario actual.",
+    )
+    if summary["by_label"]:
+        breakdown = " · ".join(
+            f"**{c}**: {n}" for c, n in sorted(summary["by_label"].items())
+        )
+        st.caption(f"Por etiqueta: {breakdown}")
 
 
 # ---------------------------------------------------------------------------
@@ -1508,8 +1518,17 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         view_corrected_flag = False
         if show_pred:
             widget_key = f"corr_idx_{job.job_id}"
+            pending_key = f"corr_pending_target_{job.job_id}"
+            # CRÍTICO: aplicar pending_key ANTES de renderizar el visor.
+            # El botón 'siguiente más incierto' encola en pending_key y hace
+            # rerun. Si esperamos a que el panel lo aplique, el visor ya
+            # se ha renderizado con el valor anterior → desincronización.
+            if pending_key in st.session_state:
+                st.session_state[widget_key] = st.session_state.pop(pending_key)
             if widget_key in st.session_state:
-                sel_idx = int(st.session_state[widget_key])
+                v = st.session_state[widget_key]
+                if v is not None:
+                    sel_idx = int(v)
             view_corrected_flag = bool(
                 st.session_state.get(f"view_corrected_{job.job_id}", False)
             )
