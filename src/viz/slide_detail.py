@@ -1381,8 +1381,17 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "del *ensemble*: una *std* alta indica desacuerdo entre miembros."
         )
 
-    # ─── Vista 'Predicciones por parche': bar chart + inspector + matriz ────
+    # ─── Vista 'Predicciones por parche': panel correcciones + bar chart + matriz ────
     elif show_pred and patch_eval is not None:
+        # Panel de correcciones bajo el visor — solo en este modo. El
+        # patólogo navega por incertidumbre, corrige los parches dudosos.
+        if pred_index is not None:
+            _render_corrections_panel(
+                job,
+                pred_index=pred_index,
+                patch_probs=pred_probs,
+                attention=attention,
+            )
         _render_patch_predictions(
             patch_eval,
             positions=positions,
@@ -1394,15 +1403,3 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         )
         if result.get("has_patch_gt"):
             _render_patch_validation(patch_eval, result)
-
-    # ─── Panel de correcciones del patólogo (Fase 0) ────────────────────────
-    # Siempre disponible en ambos modos (atención y predicciones), al final
-    # del detalle. Expander colapsado por defecto: el patólogo lo abre cuando
-    # quiere capturar correcciones.
-    if pred_index is not None:
-        _render_corrections_panel(
-            job,
-            pred_index=pred_index,
-            patch_probs=pred_probs,
-            attention=attention,
-        )
