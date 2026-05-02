@@ -41,19 +41,26 @@ if TYPE_CHECKING:
 CLASS_NAMES = ("ADE", "NOR", "CAR")
 
 # Colores consistentes con las figuras del TFM (sesión #45):
-# CAR azul, ADE naranja. NOR verde para distinguirlo.
+# CAR azul, ADE naranja. NOR verde para distinguirlo. Los hex son los
+# defaults de matplotlib/plotly que usan las figuras del documento.
 CLASS_COLORS = {
     "ADE": "#ff7f0e",   # naranja
     "NOR": "#2ca02c",   # verde
     "CAR": "#1f77b4",   # azul
 }
 
-# Mismos colores en formato RGB (0-1) para el overlay de atención
-CLASS_COLORS_RGB = {
-    "ADE": (1.00, 0.50, 0.00),
-    "NOR": (0.18, 0.80, 0.20),
-    "CAR": (0.00, 0.40, 1.00),
-}
+
+def _hex_to_rgb01(hx: str) -> tuple[float, float, float]:
+    h = hx.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+# Mismos colores en formato RGB (0-1) — derivados de CLASS_COLORS para
+# garantizar que cualquier consumidor RGB y cualquier consumidor hex usen
+# EXACTAMENTE el mismo color en pantalla. Antes existía una divergencia
+# manual (NOR matplotlib #2ca02c=44,160,44 pero CLASS_COLORS_RGB=46,204,51) que
+# producía un verde más saturado en el visor que en el resto de la UI.
+CLASS_COLORS_RGB = {k: _hex_to_rgb01(v) for k, v in CLASS_COLORS.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +588,7 @@ def _render_openseadragon_viewer(
       const SVG_NS = "http://www.w3.org/2000/svg";
       const CLASSES = ["ADE", "NOR", "CAR"];
       const CORR_COLORS = {{
-        "ADE": "rgb(255,127,14)", "NOR": "rgb(46,160,46)", "CAR": "rgb(31,119,180)",
+        "ADE": "rgb(255,127,14)", "NOR": "rgb(44,160,44)", "CAR": "rgb(31,119,180)",
         "HIP": "rgb(136,136,136)", "ART": "rgb(136,136,136)", "EXCLUDED": "rgb(136,136,136)",
       }};
 
@@ -1221,7 +1228,7 @@ def _render_corrections_panel(
               "HIP": "#888888", "ART": "#888888", "EXCLUDED": "#888888"
             };
             const FILLS = {
-              "ADE": "rgba(255,127,14,0.25)", "NOR": "rgba(46,160,46,0.25)",
+              "ADE": "rgba(255,127,14,0.25)", "NOR": "rgba(44,160,44,0.25)",
               "CAR": "rgba(31,119,180,0.25)",
               "HIP": "rgba(136,136,136,0.25)", "ART": "rgba(136,136,136,0.25)",
               "EXCLUDED": "rgba(136,136,136,0.25)"
