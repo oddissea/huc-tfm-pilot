@@ -1071,11 +1071,17 @@ def _render_corrections_panel(
             ))
             st.session_state[target_key] = patch_idx
         with col_next:
-            # Saltar al siguiente más incierto que NO sea el actual.
-            next_uncertain = next(
-                (int(i) for i in order if int(i) != patch_idx),
-                int(order[0]) if len(order) > 0 else 0,
-            )
+            # Saltar al siguiente parche en el ranking de incertidumbre.
+            # Si el patch_idx actual está en el ranking, avanzamos al
+            # siguiente (k+1). Si llegamos al final, volvemos al principio.
+            # Si no está en el ranking (caso raro), usamos el más incierto.
+            order_list = [int(x) for x in order]
+            if patch_idx in order_list:
+                cur_pos = order_list.index(patch_idx)
+                next_pos = (cur_pos + 1) % len(order_list)
+                next_uncertain = order_list[next_pos]
+            else:
+                next_uncertain = order_list[0] if order_list else 0
             if st.button(
                 f"💡 Siguiente más incierto (#{next_uncertain})",
                 key=f"corr_next_{job.job_id}",
