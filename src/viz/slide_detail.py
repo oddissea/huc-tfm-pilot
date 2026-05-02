@@ -34,6 +34,7 @@ from src.corrections import (
     record_correction,
     summarize_corrections,
 )
+from src.viz.osd_component import osd_viewer
 
 if TYPE_CHECKING:
     from src.jobs.manager import Job
@@ -462,6 +463,7 @@ def _render_openseadragon_viewer(
     height: int = 620,
     selected_idx: int | None = None,
     view_corrected: bool = False,
+    enable_click_capture: bool = False,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
     apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
@@ -490,6 +492,7 @@ def _render_openseadragon_viewer(
     # restando el offset del DZI stitched (las posiciones del H5 están en
     # coords del WSI completo; el DZI stitched empieza en (y_min, x_min)).
     overlays_json = "[]"
+    items: list[dict] = []
     y_off, x_off = dzi_offset
     sr, sg, sb = CLASS_COLORS_RGB.get(slide_pred_class, (0.5, 0.5, 0.5))
     # Carga las pred_probs (N, 3) del patch_eval.npz para incluirlas en el
@@ -506,7 +509,6 @@ def _render_openseadragon_viewer(
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         att_arr = np.asarray(attention) if attention is not None else None
         att_max = float(att_arr.max()) if (att_arr is not None and att_arr.size > 0) else 0.0
-        items = []
         for i, (pos, p) in enumerate(zip(positions, pred_index)):
             cls = CLASS_NAMES[int(p)]
             r, g, b = CLASS_COLORS_RGB[cls]
@@ -518,8 +520,7 @@ def _render_openseadragon_viewer(
                 "color": color,
                 "idx": i,
                 "cls": cls,
-                "pos_y": int(pos[0]),
-                "pos_x": int(pos[1]),
+                "pos": [int(pos[0]), int(pos[1])],
             }
             if att_arr is not None:
                 a = float(att_arr[i])
@@ -539,9 +540,26 @@ def _render_openseadragon_viewer(
             items.append(item)
         overlays_json = json.dumps(items)
 
-    # `data-show-pred` y `data-show-att` se interpolan al HTML para que
-    # el JS pinte/oculte cada layer. Cambiar los toggles en Streamlit
-    # dispara rerun y se reinterpola.
+    # Modo custom component: bidireccional (captura clicks → devuelve
+    # {idx, ts}). Requiere que el path-based component esté registrado
+    # y que nginx tenga X-Frame-Options SAMEORIGIN. Más sofisticado, pero
+    # acepta clicks del visor y los puede llevar al panel de correcciones.
+    if enable_click_capture:
+        return osd_viewer(
+            dzi_url=dzi_url,
+            overlays=items,
+            height=height,
+            show_predictions=show_predictions,
+            show_attention=show_attention,
+            selected_idx=selected_idx,
+            view_corrected=view_corrected,
+            key=f"osd_{job.job_id}",
+        )
+
+    # Modo inline (st.components.v1.html): unidireccional (solo render),
+    # sin captura de clicks. Más estable y autocontenido. Es el default
+    # para no introducir el riesgo del custom component cuando no hace
+    # falta capturar clicks.
     show_pred_js = "true" if show_predictions else "false"
     show_att_js = "true" if show_attention else "false"
     selected_idx_js = "null" if selected_idx is None else str(int(selected_idx))
@@ -685,7 +703,7 @@ def _render_openseadragon_viewer(
           if (o.corrected) {{
             lines.push(`✓ corregido como: ${{o.corrected}}`);
           }}
-          lines.push(`posición: y=${{o.pos_y}}, x=${{o.pos_x}}`);
+          lines.push(`posición: y=${{o.pos[0]}}, x=${{o.pos[1]}}`);
           div.title = lines.join("\\n");
           div.appendChild(svg);
 
@@ -1539,7 +1557,11 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             view_corrected_flag = bool(
                 st.session_state.get(f"view_corrected_{job.job_id}", False)
             )
-        _render_openseadragon_viewer(
+        # En modo predicciones, usar el custom component (con click
+        # capture). En modo atención, mantener el inline (más simple,
+        # sin necesidad de captura — el patólogo solo está mirando los
+        # hot-spots, no corrigiendo).
+        clicked = _render_openseadragon_viewer(
             job,
             positions=positions,
             pred_index=pred_index,
@@ -1551,7 +1573,19 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             dzi_offset=osd_offset,
             selected_idx=sel_idx,
             view_corrected=view_corrected_flag,
+            enable_click_capture=show_pred,
         )
+
+        # Si llegó un click nuevo, lo encolamos en pending_key — al
+        # principio del próximo rerun se aplicará a widget_key (la del
+        # number_input). Mismo mecanismo que el botón "siguiente más
+        # incierto" para mantener combo + visor sincronizados.
+        if isinstance(clicked, dict) and "ts" in clicked and show_pred:
+            last_seen_key = f"corr_last_click_ts_{job.job_id}"
+            if st.session_state.get(last_seen_key) != clicked["ts"]:
+                st.session_state[last_seen_key] = clicked["ts"]
+                st.session_state[f"corr_pending_target_{job.job_id}"] = int(clicked["idx"])
+                st.rerun()
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
             "parche para ver `#índice · clase · atención`. Las áreas blancas "

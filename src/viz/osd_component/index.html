@@ -63,10 +63,17 @@
     let initialized = false;
     let selectedIdx = null;
     let overlaysData = [];
+    let viewCorrected = false;
     const strokeRects = new Map();
     const fillRects = new Map();
     const patchDivs = new Map();
     const SVG_NS = "http://www.w3.org/2000/svg";
+
+    // Paleta unificada con CLASS_COLORS de slide_detail.py (matplotlib).
+    const CORR_COLORS = {
+      "ADE": "rgb(255,127,14)", "NOR": "rgb(44,160,44)", "CAR": "rgb(31,119,180)",
+      "HIP": "rgb(136,136,136)", "ART": "rgb(136,136,136)", "EXCLUDED": "rgb(136,136,136)",
+    };
 
     const sendStreamlit = window.__sendStreamlit;
 
@@ -86,17 +93,39 @@
       svg.appendChild(fillRect);
       fillRects.set(o.idx, fillRect);
 
+      // Stroke (predicción): borde del color de la clase predicha del
+      // parche. Si el toggle 'ver correcciones aplicadas' está ON y el
+      // parche tiene corrección, usamos el color de la corrección.
+      let strokeColor = o.color;
+      if (viewCorrected && o.corrected && CORR_COLORS[o.corrected]) {
+        strokeColor = CORR_COLORS[o.corrected];
+      }
       const strokeRect = document.createElementNS(SVG_NS, "rect");
       strokeRect.setAttribute("x", "0.015");
       strokeRect.setAttribute("y", "0.015");
       strokeRect.setAttribute("width", "0.97");
       strokeRect.setAttribute("height", "0.97");
       strokeRect.setAttribute("fill", "none");
-      strokeRect.setAttribute("stroke", o.color);
-      strokeRect.setAttribute("stroke-width", "0.025");
+      strokeRect.setAttribute("stroke", strokeColor);
+      strokeRect.setAttribute("stroke-width", "0.06");
       svg.appendChild(strokeRect);
       strokeRects.set(o.idx, strokeRect);
 
+      // Marcador 'ya corregido': círculo coloreado en la esquina superior
+      // derecha. Visible siempre que el parche tenga corrección, sin
+      // depender del toggle. Permite ver de un vistazo qué parches ya se
+      // tocaron.
+      if (o.corrected && CORR_COLORS[o.corrected]) {
+        const dot = document.createElementNS(SVG_NS, "circle");
+        dot.setAttribute("cx", "0.85"); dot.setAttribute("cy", "0.15");
+        dot.setAttribute("r", "0.10");
+        dot.setAttribute("fill", CORR_COLORS[o.corrected]);
+        dot.setAttribute("stroke", "#fff");
+        dot.setAttribute("stroke-width", "0.025");
+        svg.appendChild(dot);
+      }
+
+      // Selección amarilla: visible solo cuando idx == selectedIdx.
       const selRect = document.createElementNS(SVG_NS, "rect");
       selRect.setAttribute("x", "0.04");
       selRect.setAttribute("y", "0.04");
@@ -104,7 +133,7 @@
       selRect.setAttribute("height", "0.92");
       selRect.setAttribute("fill", "none");
       selRect.setAttribute("stroke", "#fff200");
-      selRect.setAttribute("stroke-width", "0.06");
+      selRect.setAttribute("stroke-width", "0.10");
       selRect.setAttribute("class", "sel-marker");
       selRect.style.display = "none";
       svg.appendChild(selRect);
@@ -112,12 +141,13 @@
       const div = document.createElement("div");
       div.className = "osd-patch";
       let tip = `parche #${o.idx}`;
-      if (o.cls) tip += `\nclase predicha: ${o.cls}`;
-      if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} NOR=${o.probs[1].toFixed(3)} CAR=${o.probs[2].toFixed(3)}`;
+      if (o.cls) tip += `\npredicción F4: ${o.cls}`;
+      if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
       if (o.att !== undefined) {
         const pct = (o.att_rel * 100).toFixed(0);
         tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
       }
+      if (o.corrected) tip += `\n✓ corregido como: ${o.corrected}`;
       if (o.pos) tip += `\nposición (y,x): (${o.pos[0]}, ${o.pos[1]})`;
       div.title = tip;
       div.appendChild(svg);
@@ -140,6 +170,7 @@
     function setupViewer(args) {
       const { dzi_url, overlays, height } = args;
       overlaysData = overlays || [];
+      viewCorrected = args.view_corrected === true;
       document.getElementById("viewer").style.height = `${height}px`;
       sendStreamlit("streamlit:setFrameHeight", { height: height + 10 });
 
@@ -163,8 +194,12 @@
       });
 
       viewer.addHandler("open", function() {
+        let selectedOverlay = null;
         for (const o of overlaysData) {
           const div = buildOverlayDiv(o);
+          if (window.__pendingSelected != null && o.idx === window.__pendingSelected) {
+            selectedOverlay = o;
+          }
           viewer.addOverlay({
             element: div,
             location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
@@ -172,6 +207,17 @@
         }
         applyToggles(window.__lastArgs || {});
         if (window.__pendingSelected != null) updateSelection(window.__pendingSelected);
+
+        // Si hay un parche pre-seleccionado, paneamos+zoomeamos hasta él
+        // para que el patólogo lo vea inmediatamente sin tener que buscar.
+        if (selectedOverlay) {
+          const target = viewer.viewport.imageToViewportCoordinates(
+            selectedOverlay.x + selectedOverlay.size / 2,
+            selectedOverlay.y + selectedOverlay.size / 2
+          );
+          viewer.viewport.zoomTo(3.0, target, true);
+          viewer.viewport.panTo(target, true);
+        }
 
         // Cuando OSD inicializa, el iframe puede estar todavía ajustándose
         // a su altura final (Streamlit aplica setFrameHeight asíncronamente).

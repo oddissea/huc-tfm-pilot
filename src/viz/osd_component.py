@@ -27,6 +27,7 @@ def osd_viewer(
     show_predictions: bool = True,
     show_attention: bool = False,
     selected_idx: int | None = None,
+    view_corrected: bool = False,
     key: str | None = None,
 ) -> dict | None:
     """Renderiza el visor OpenSeadragon con click-events y toggles.
@@ -65,6 +66,7 @@ def osd_viewer(
         show_predictions=show_predictions,
         show_attention=show_attention,
         selected_idx=selected_idx,
+        view_corrected=view_corrected,
         key=key,
         default=None,
     )
