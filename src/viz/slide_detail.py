@@ -452,6 +452,7 @@ def _render_openseadragon_viewer(
     show_attention: bool = False,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
+    selected_idx: int | None = None,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
     apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
@@ -525,6 +526,7 @@ def _render_openseadragon_viewer(
     # dispara rerun y se reinterpola.
     show_pred_js = "true" if show_predictions else "false"
     show_att_js = "true" if show_attention else "false"
+    selected_idx_js = "null" if selected_idx is None else str(int(selected_idx))
 
     html = f"""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
@@ -562,10 +564,12 @@ def _render_openseadragon_viewer(
       const overlays = {overlays_json};
       const SHOW_PRED = {show_pred_js};
       const SHOW_ATT = {show_att_js};
+      const SELECTED_IDX = {selected_idx_js};
       const SVG_NS = "http://www.w3.org/2000/svg";
       const CLASSES = ["ADE", "NOR", "CAR"];
 
       viewer.addHandler("open", function() {{
+        let selectedOverlay = null;
         for (const o of overlays) {{
           const svg = document.createElementNS(SVG_NS, "svg");
           svg.setAttribute("viewBox", "0 0 1 1");
@@ -591,6 +595,21 @@ def _render_openseadragon_viewer(
             sr.setAttribute("stroke", o.color);
             sr.setAttribute("stroke-width", "0.06");
             svg.appendChild(sr);
+          }}
+
+          // Selección: borde amarillo grueso encima de la predicción si
+          // este parche es el seleccionado en el panel de correcciones.
+          // Sirve de feedback visual entre el number_input/botón
+          // 'siguiente más incierto' del panel y el visor.
+          if (SELECTED_IDX !== null && o.idx === SELECTED_IDX) {{
+            const sel = document.createElementNS(SVG_NS, "rect");
+            sel.setAttribute("x", "0.04"); sel.setAttribute("y", "0.04");
+            sel.setAttribute("width", "0.92"); sel.setAttribute("height", "0.92");
+            sel.setAttribute("fill", "none");
+            sel.setAttribute("stroke", "#fff200");
+            sel.setAttribute("stroke-width", "0.10");
+            svg.appendChild(sel);
+            selectedOverlay = o;
           }}
 
           const div = document.createElement("div");
@@ -620,6 +639,19 @@ def _render_openseadragon_viewer(
             element: div,
             location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
           }});
+        }}
+
+        // Si hay un parche seleccionado, paneamos la vista hasta él para
+        // que el patólogo lo vea inmediatamente sin tener que buscar.
+        // Zoom moderado (3x) para ver el parche con detalle pero
+        // manteniendo algo de contexto alrededor.
+        if (selectedOverlay) {{
+          const target = viewer.viewport.imageToViewportCoordinates(
+            selectedOverlay.x + selectedOverlay.size / 2,
+            selectedOverlay.y + selectedOverlay.size / 2
+          );
+          viewer.viewport.zoomTo(3.0, target, true);
+          viewer.viewport.panTo(target, true);
         }}
       }});
     </script>
@@ -1324,6 +1356,15 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             int(job.extra.get("dzi_y_min", 0)),
             int(job.extra.get("dzi_x_min", 0)),
         )
+        # Si estamos en modo predicciones y ya se ha seleccionado un parche
+        # en el panel de correcciones, le pasamos al visor `selected_idx`
+        # para que dibuje el borde amarillo y centre la vista en él.
+        # En modo atención no destacamos nada.
+        sel_idx = None
+        if show_pred:
+            target_key = f"corr_target_{job.job_id}"
+            if target_key in st.session_state:
+                sel_idx = int(st.session_state[target_key])
         _render_openseadragon_viewer(
             job,
             positions=positions,
@@ -1334,6 +1375,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             show_predictions=show_pred,
             show_attention=show_att,
             dzi_offset=osd_offset,
+            selected_idx=sel_idx,
         )
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
