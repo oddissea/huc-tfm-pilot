@@ -1166,7 +1166,8 @@ def _render_corrections_panel(
 
         # Info del parche seleccionado: replica el contenido del hover
         # del visor para que el patólogo confirme que va a corregir el
-        # parche correcto.
+        # parche correcto. Si ya está corregido, lo decimos en una
+        # segunda línea con el icono ✓.
         pred_str_sel = CLASS_NAMES[int(pred_index[patch_idx])]
         att_sel = float(attention[patch_idx]) if patch_idx < len(attention) else 0.0
         if patch_probs is not None:
@@ -1179,10 +1180,60 @@ def _render_corrections_panel(
         else:
             probs_str = "?"
             conf_str_sel = "?"
-        st.caption(
+        caption_text = (
             f"**#{patch_idx}** · predicción F4: **{pred_str_sel}** "
             f"({conf_str_sel}) · probs: {probs_str} · atención: {att_sel:.4f}"
         )
+        # Última corrección registrada para este parche (last-wins).
+        existing_corr = next(
+            (c.label_corr for c in reversed(list_corrections(job.job_dir))
+             if int(c.patch_idx) == patch_idx),
+            None,
+        )
+        if existing_corr:
+            caption_text += f"\n\n✓ **Corregido a {existing_corr}**"
+        st.caption(caption_text)
+
+        # CSS para colorear los botones del segmented_control de etiquetas
+        # con el color de cada clase. El selector :has(label:nth-of-type(6))
+        # apunta solo al segmented_control con 6 opciones (las CORRECTION_LABELS),
+        # NO al de 2 opciones de modo (Atención/Predicciones) que también
+        # vive en la página. Streamlit no expone API nativa para colorear
+        # opciones individuales; este es el approach más estable disponible.
+        # ADE=naranja, NOR=verde, CAR=azul, HIP/ART/EXCLUDED=gris.
+        st.markdown("""
+        <style>
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label {
+            border-width: 2px !important;
+            font-weight: 600 !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(1) {
+            border-color: #ff7f0e !important; color: #ff7f0e !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(2) {
+            border-color: #2ca02c !important; color: #2ca02c !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(3) {
+            border-color: #1f77b4 !important; color: #1f77b4 !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(n+4) {
+            border-color: #888 !important; color: #888 !important;
+        }
+        /* Cuando el botón está seleccionado, fondo del color de su clase */
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(1):has(input:checked) {
+            background-color: rgba(255, 127, 14, 0.25) !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(2):has(input:checked) {
+            background-color: rgba(46, 160, 46, 0.25) !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(3):has(input:checked) {
+            background-color: rgba(31, 119, 180, 0.25) !important;
+        }
+        div[data-testid="stSegmentedControl"]:has(label:nth-of-type(6)) label:nth-of-type(n+4):has(input:checked) {
+            background-color: rgba(136, 136, 136, 0.25) !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
         # Selector de clase. segmented_control para que sea un click directo.
         new_label = st.segmented_control(
