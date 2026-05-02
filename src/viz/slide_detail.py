@@ -1023,14 +1023,19 @@ def _render_corrections_panel(
         if target_key not in st.session_state:
             st.session_state[target_key] = int(order[0]) if len(order) > 0 else 0
 
+        # Label común fuera de la fila para que el number_input y el botón
+        # queden alineados horizontalmente (sin desfase vertical por el
+        # label propio del input).
+        st.markdown(f"**Parche a corregir** (0–{n_patches - 1})")
         col_idx, col_next = st.columns([2, 1])
         with col_idx:
             patch_idx = int(st.number_input(
-                f"Parche a corregir (0–{n_patches - 1})",
+                "Parche a corregir",
                 min_value=0, max_value=n_patches - 1, step=1,
                 value=int(st.session_state[target_key]),
                 key=f"corr_idx_{job.job_id}",
                 help="Teclea el #índice que ves en el hover del visor.",
+                label_visibility="collapsed",
             ))
             st.session_state[target_key] = patch_idx
         with col_next:
@@ -1039,7 +1044,6 @@ def _render_corrections_panel(
                 (int(i) for i in order if int(i) != patch_idx),
                 int(order[0]) if len(order) > 0 else 0,
             )
-            st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer vertical
             if st.button(
                 f"💡 Siguiente más incierto (#{next_uncertain})",
                 key=f"corr_next_{job.job_id}",
