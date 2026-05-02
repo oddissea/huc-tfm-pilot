@@ -2,7 +2,21 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+  <script>
+    /**
+     * Bridge de Streamlit ANTES de cargar nada externo: aunque OpenSeadragon
+     * fallara al descargar (CSP, red, etc.), el componente al menos avisará
+     * a Streamlit de que está vivo y no veremos "trouble loading" — el visor
+     * fallará pero el iframe se renderiza.
+     */
+    function sendStreamlit(type, payload) {
+      window.parent.postMessage(Object.assign({
+        isStreamlitMessage: true, type: type,
+      }, payload || {}), "*");
+    }
+    sendStreamlit("streamlit:componentReady", { apiVersion: 1 });
+  </script>
+  <link rel="stylesheet" href="openseadragon.min.css">
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background: transparent; font-family: system-ui, sans-serif; }
     #viewer { width: 100%; background: transparent; border-radius: 6px; }
@@ -19,20 +33,15 @@
 <body>
   <div id="viewer"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+  <script src="openseadragon.min.js"></script>
   <script>
     /**
      * Streamlit path-based component bridge implementado a mano con
-     * postMessage directo. No depende del SDK de streamlit-component-lib
-     * (que no se carga automáticamente en componentes path-based, lo cual
-     * fue la causa del fallo en sesión #54).
+     * postMessage directo. `sendStreamlit` y el componentReady inicial
+     * están en el <head> para que se ejecute antes incluso de cargar
+     * OpenSeadragon — si el script externo fallase, al menos el iframe
+     * está vivo para Streamlit.
      */
-    function sendStreamlit(type, payload) {
-      window.parent.postMessage(Object.assign({
-        isStreamlitMessage: true, type: type,
-      }, payload || {}), "*");
-    }
-
     let viewer = null;
     let initialized = false;
     let selectedIdx = null;
@@ -48,7 +57,7 @@
 
       viewer = OpenSeadragon({
         id: "viewer",
-        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
+        prefixUrl: "images/",
         tileSources: dzi_url,
         background: "transparent",
         showNavigator: true,
@@ -195,8 +204,9 @@
       }
     });
 
-    // Avisamos al parent de que estamos listos para recibir renders.
-    sendStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    // componentReady ya se envió en el <head> ANTES de cargar OpenSeadragon.
+    // No hace falta repetirlo aquí — Streamlit lo trata como idempotente
+    // pero es buena práctica enviar una sola vez.
   </script>
 </body>
 </html>
