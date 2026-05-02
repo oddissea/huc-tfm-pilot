@@ -164,7 +164,9 @@
       // de un drag de pan.
       div.addEventListener("click", function(ev) {
         ev.stopPropagation();
-        updateSelection(o.idx);
+        // markSelected: solo amarillo, sin pan/zoom. Ya estás mirando
+        // ahí, mover la vista despista.
+        markSelected(o.idx);
         console.log("[osd_viewer] div-click", o.idx);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: o.idx, ts: Date.now() },
@@ -279,20 +281,18 @@
         console.warn("[osd_viewer] ResizeObserver unavailable:", e);
       }
 
-      // canvas-click: dispara SIEMPRE para clicks limpios sobre el visor,
-      // tanto sobre tile como sobre overlay. event.quick=true significa
-      // click limpio (no parte de un drag). event.position son píxeles
-      // del canvas; convertimos a coords de imagen y buscamos el patch.
+      // canvas-click: ahora redundante porque cada div del overlay tiene
+      // su propio click listener (pointer-events:auto). Lo dejamos como
+      // fallback por si algún click no llega al div (ej. zoom muy bajo
+      // donde los divs son submilimétricos y el cursor cae entre ellos).
       viewer.addHandler("canvas-click", function(event) {
         if (!event.quick) return;
         const viewportPos = viewer.viewport.pointFromPixel(event.position);
         const imgPos = viewer.viewport.viewportToImageCoordinates(viewportPos);
         const idx = findPatchAtImageCoords(imgPos.x, imgPos.y);
-        console.log("[osd_viewer] canvas-click", {
-          pixel: event.position, image: imgPos, idx: idx,
-        });
         if (idx == null) return;
-        updateSelection(idx);
+        console.log("[osd_viewer] canvas-click fallback", idx);
+        markSelected(idx);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: idx, ts: Date.now() },
           dataType: "json",
@@ -300,11 +300,10 @@
       });
     }
 
-    function updateSelection(idx) {
-      // Quitamos la marca del anterior. Manipulamos style.display
-      // directamente porque el style inline tiene mayor prioridad que
-      // las reglas CSS — sin esto, el .osd-selected del CSS no podría
-      // sobrescribir el `display:none` inicial que ponemos al crear el rect.
+    function markSelected(idx) {
+      // Solo cambia el highlight amarillo (clase + display del rect).
+      // No mueve la vista. Usado por el click directo en el visor:
+      // el patólogo ya está mirando ese sitio, mover sería despistar.
       if (selectedIdx != null && patchDivs.has(selectedIdx)) {
         const prev = patchDivs.get(selectedIdx);
         prev.classList.remove("osd-selected");
@@ -318,34 +317,35 @@
         const newSel = cur.querySelector("rect.sel-marker");
         if (newSel) newSel.style.display = "block";
       }
+      applyToggles(window.__lastArgs || {});
+    }
 
-      // Pan + zoom al parche seleccionado SOLO cuando el patólogo
-      // todavía está cerca del zoom inicial (vista panorámica). Si ya
-      // hizo zoom manual (está examinando algo en detalle), no hacemos
-      // nada — preservamos su contexto visual completo. Solo el borde
-      // amarillo cambia de sitio. Threshold: 1.5 × home_zoom.
+    function navigateToSelected(idx) {
+      // markSelected + pan al parche. Si el patólogo no había hecho
+      // zoom (vista panorámica), también aplica zoom 3x. Si ya tenía
+      // zoom manual, mantiene ese nivel y solo panea hasta el nuevo
+      // parche. Usado por el botón 'siguiente más incierto' y por
+      // cambios del number_input — el patólogo está navegando, quiere
+      // ver el nuevo parche.
+      markSelected(idx);
       if (viewer && viewer.world && viewer.world.getItemCount() > 0 && idx != null) {
         const o = overlaysData.find(x => x.idx === idx);
         if (o) {
           try {
+            const target = viewer.viewport.imageToViewportCoordinates(
+              o.x + o.size / 2, o.y + o.size / 2
+            );
             const homeZoom = viewer.viewport.getHomeZoom();
             const currentZoom = viewer.viewport.getZoom();
             if (currentZoom < homeZoom * 1.5) {
-              const target = viewer.viewport.imageToViewportCoordinates(
-                o.x + o.size / 2, o.y + o.size / 2
-              );
               viewer.viewport.zoomTo(homeZoom * 3.0, target, true);
-              viewer.viewport.panTo(target, true);
             }
+            viewer.viewport.panTo(target, true);
           } catch (e) {
-            console.warn("[osd_viewer] zoom/pan failed:", e);
+            console.warn("[osd_viewer] navigate failed:", e);
           }
         }
       }
-
-      // Refrescar visibilidad de strokeRect/selRect según el toggle
-      // 'bordes off' (puede haber cambiado al seleccionar otro parche).
-      applyToggles(window.__lastArgs || {});
     }
 
     function applyToggles(args) {
@@ -435,10 +435,19 @@
         if (args.overlays) overlaysData = args.overlays;
         applyToggles(args);
       }
+      // Selección que viene del parent (panel de correcciones): si
+      // pan_to_selected=true, navegamos al parche (botón siguiente,
+      // number_input). Si false, solo marcamos amarillo (cuando es eco
+      // de un click capturado: el patólogo ya está allí mirando).
       const externallySelected = args.selected_idx;
+      const panToSelected = args.pan_to_selected === true;
       if (externallySelected != null) {
-        if (initialized && patchDivs.size > 0) updateSelection(externallySelected);
-        else window.__pendingSelected = externallySelected;
+        if (initialized && patchDivs.size > 0) {
+          if (panToSelected) navigateToSelected(externallySelected);
+          else markSelected(externallySelected);
+        } else {
+          window.__pendingSelected = externallySelected;
+        }
       }
       sendStreamlit("streamlit:setFrameHeight", { height: args.height + 10 });
     }

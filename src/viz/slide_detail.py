@@ -464,6 +464,7 @@ def _render_openseadragon_viewer(
     selected_idx: int | None = None,
     view_corrected: bool = False,
     show_selected_borders: bool = True,
+    pan_to_selected: bool = False,
     enable_click_capture: bool = False,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
@@ -555,6 +556,7 @@ def _render_openseadragon_viewer(
             selected_idx=selected_idx,
             view_corrected=view_corrected,
             show_selected_borders=show_selected_borders,
+            pan_to_selected=pan_to_selected,
             key=f"osd_{job.job_id}",
         )
 
@@ -1174,7 +1176,9 @@ def _render_corrections_panel(
                 use_container_width=True,
                 help="Salta los parches que ya tienen corrección registrada.",
             ):
+                # pending_pan=True para que el visor navegue al destino.
                 st.session_state[pending_key] = next_uncertain
+                st.session_state[f"corr_pending_pan_{job.job_id}"] = True
                 st.rerun()
 
         # Toggle: ver el visor con la predicción del modelo (default)
@@ -1555,15 +1559,19 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         sel_idx = None
         view_corrected_flag = False
         show_sel_borders_flag = True
+        pan_to_selected_flag = False
         if show_pred:
             widget_key = f"corr_idx_{job.job_id}"
             pending_key = f"corr_pending_target_{job.job_id}"
+            pending_pan_key = f"corr_pending_pan_{job.job_id}"
             # CRÍTICO: aplicar pending_key ANTES de renderizar el visor.
-            # El botón 'siguiente más incierto' encola en pending_key y hace
-            # rerun. Si esperamos a que el panel lo aplique, el visor ya
-            # se ha renderizado con el valor anterior → desincronización.
+            # El botón 'siguiente más incierto' encola en pending_key
+            # (con pending_pan=True para que el visor panee al destino).
+            # El click capturado del visor también encola en pending_key
+            # pero con pending_pan=False (ya estás mirando ahí, no panees).
             if pending_key in st.session_state:
                 st.session_state[widget_key] = st.session_state.pop(pending_key)
+                pan_to_selected_flag = bool(st.session_state.pop(pending_pan_key, False))
             if widget_key in st.session_state:
                 v = st.session_state[widget_key]
                 if v is not None:
@@ -1591,18 +1599,20 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             selected_idx=sel_idx,
             view_corrected=view_corrected_flag,
             show_selected_borders=show_sel_borders_flag,
+            pan_to_selected=pan_to_selected_flag,
             enable_click_capture=show_pred,
         )
 
         # Si llegó un click nuevo, lo encolamos en pending_key — al
         # principio del próximo rerun se aplicará a widget_key (la del
-        # number_input). Mismo mecanismo que el botón "siguiente más
-        # incierto" para mantener combo + visor sincronizados.
+        # number_input). pending_pan=False: el patólogo ya está mirando
+        # el parche cliqueado, mover la vista despistaría.
         if isinstance(clicked, dict) and "ts" in clicked and show_pred:
             last_seen_key = f"corr_last_click_ts_{job.job_id}"
             if st.session_state.get(last_seen_key) != clicked["ts"]:
                 st.session_state[last_seen_key] = clicked["ts"]
                 st.session_state[f"corr_pending_target_{job.job_id}"] = int(clicked["idx"])
+                st.session_state[f"corr_pending_pan_{job.job_id}"] = False
                 st.rerun()
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
