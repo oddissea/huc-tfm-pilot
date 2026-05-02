@@ -606,6 +606,31 @@ def _render_openseadragon_viewer(
           }});
         }}
       }});
+
+      // Forzar reflow agresivo en los primeros segundos. El iframe de
+      // st.components.v1.html puede inicializarse con altura distinta
+      // a la final (Streamlit ajusta layout en varios pases). OSD ve un
+      // contenedor pequeño y no carga tiles bien hasta que el user
+      // redimensiona la ventana — mecanismo que reproducimos aquí
+      // automáticamente con varios reflows escalonados.
+      function forceReflow() {{
+        try {{
+          viewer.viewport.resize();
+          viewer.forceRedraw();
+        }} catch (e) {{ /* viewer aún no listo */ }}
+      }}
+      setTimeout(forceReflow, 100);
+      setTimeout(forceReflow, 300);
+      setTimeout(forceReflow, 800);
+      setTimeout(forceReflow, 1500);
+
+      // ResizeObserver: pilla cualquier cambio del contenedor (incluido
+      // el ajuste asíncrono de Streamlit que ocurre tras el primer paint).
+      try {{
+        const ro = new ResizeObserver(forceReflow);
+        ro.observe(document.getElementById("osd-{job.job_id}"));
+        ro.observe(document.body);
+      }} catch (e) {{ /* ResizeObserver no soportado */ }}
     </script>
     """
     import streamlit.components.v1 as components
