@@ -452,33 +452,31 @@ def _render_openseadragon_viewer(
     show_attention: bool = False,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
-) -> None:
+) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
     apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
     predicciones, dibuja un overlay SVG con un rectángulo del color de la
     clase predicha sobre cada parche en sus coordenadas del WSI stitched.
 
-    Implementación con `st.components.v1.html` inline (no custom component):
-    el custom component path-based daba problemas de timing con la carga
-    del iframe (visor solo aparecía tras redimensionar la ventana) y
-    requería bridge JS extra. El inline carga al primer intento sin
-    requerimientos especiales, a cambio de no poder capturar clicks.
-    Los clicks no son críticos: el panel de correcciones tiene un
-    `st.number_input` que el patólogo usa para teclear el #idx que ve
-    en el hover del visor.
+    Devuelve el último click sobre un parche en formato `{"idx", "ts"}` o
+    None si nunca se hizo click (o si no hay DZI).
 
     nginx sirve `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
     (ver `nginx.conf` location /dzi/). El navegador hereda BasicAuth
     same-origin para los tiles.
     """
     if not job.dzi_path.exists():
-        return
+        return None
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
+    # Construye el JSON con posiciones + clase + atención de cada parche,
+    # restando el offset del DZI stitched (las posiciones del H5 están en
+    # coords del WSI completo; el DZI stitched empieza en (y_min, x_min)).
     overlays_json = "[]"
     y_off, x_off = dzi_offset
     sr, sg, sb = CLASS_COLORS_RGB.get(slide_pred_class, (0.5, 0.5, 0.5))
-
+    # Carga las pred_probs (N, 3) del patch_eval.npz para incluirlas en el
+    # hover de cada parche.
     pe = _load_patch_eval(job)
     pred_probs_arr = (
         np.asarray(pe["pred_probs"])
@@ -516,10 +514,15 @@ def _render_openseadragon_viewer(
                     f"{round(min(rel * 0.85, 0.85), 3)})"
                 )
             if pred_probs_arr is not None:
-                item["probs"] = [round(float(v), 3) for v in pred_probs_arr[i]]
+                pp = pred_probs_arr[i]
+                # Probs en orden CLASS_NAMES = (ADE, NOR, CAR)
+                item["probs"] = [round(float(v), 3) for v in pp]
             items.append(item)
         overlays_json = json.dumps(items)
 
+    # `data-show-pred` y `data-show-att` se interpolan al HTML para que
+    # el JS pinte/oculte cada layer. Cambiar los toggles en Streamlit
+    # dispara rerun y se reinterpola.
     show_pred_js = "true" if show_predictions else "false"
     show_att_js = "true" if show_attention else "false"
 
@@ -548,6 +551,11 @@ def _render_openseadragon_viewer(
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
+        // Permite hacer zoom hasta 5× más allá de la resolución nativa de
+        // los tiles (por defecto 1.1x). El patólogo puede inspeccionar
+        // morfología fina sin necesidad del panel del inspector aparte.
+        // No tiene coste server-side: solo escala client-side (más allá
+        // se ve pixelado, pero útil para verificar bordes y formas).
         maxZoomPixelRatio: 5,
       }});
 
@@ -563,6 +571,8 @@ def _render_openseadragon_viewer(
           svg.setAttribute("viewBox", "0 0 1 1");
           svg.setAttribute("preserveAspectRatio", "none");
 
+          // Fill (atención): rect completo del color de la clase del slide,
+          // alpha proporcional a la atención (incluida en o.att_fill rgba).
           if (SHOW_ATT && o.att_fill) {{
             const fr = document.createElementNS(SVG_NS, "rect");
             fr.setAttribute("x", "0"); fr.setAttribute("y", "0");
@@ -572,6 +582,7 @@ def _render_openseadragon_viewer(
             svg.appendChild(fr);
           }}
 
+          // Stroke (predicción): borde del color de la clase predicha del parche.
           if (SHOW_PRED) {{
             const sr = document.createElementNS(SVG_NS, "rect");
             sr.setAttribute("x", "0.015"); sr.setAttribute("y", "0.015");
@@ -584,6 +595,11 @@ def _render_openseadragon_viewer(
 
           const div = document.createElement("div");
           div.className = "osd-patch";
+          // Hint completo en multilínea — replicaba lo que mostraba el
+          // antiguo panel del inspector (ahora retirado): clase, 3 probs
+          // del clasificador F4, atención AttnMIL absoluta + relativa,
+          // y posición del parche en el slide. Los browsers renderizan
+          // los \\n como saltos de línea en el title nativo.
           let lines = [
             `parche #${{o.idx}}`,
             `predicción F4: ${{o.cls}}`,
@@ -606,35 +622,13 @@ def _render_openseadragon_viewer(
           }});
         }}
       }});
-
-      // Forzar reflow agresivo en los primeros segundos. El iframe de
-      // st.components.v1.html puede inicializarse con altura distinta
-      // a la final (Streamlit ajusta layout en varios pases). OSD ve un
-      // contenedor pequeño y no carga tiles bien hasta que el user
-      // redimensiona la ventana — mecanismo que reproducimos aquí
-      // automáticamente con varios reflows escalonados.
-      function forceReflow() {{
-        try {{
-          viewer.viewport.resize();
-          viewer.forceRedraw();
-        }} catch (e) {{ /* viewer aún no listo */ }}
-      }}
-      setTimeout(forceReflow, 100);
-      setTimeout(forceReflow, 300);
-      setTimeout(forceReflow, 800);
-      setTimeout(forceReflow, 1500);
-
-      // ResizeObserver: pilla cualquier cambio del contenedor (incluido
-      // el ajuste asíncrono de Streamlit que ocurre tras el primer paint).
-      try {{
-        const ro = new ResizeObserver(forceReflow);
-        ro.observe(document.getElementById("osd-{job.job_id}"));
-        ro.observe(document.body);
-      }} catch (e) {{ /* ResizeObserver no soportado */ }}
     </script>
     """
     import streamlit.components.v1 as components
     components.html(html, height=height + 20, scrolling=False)
+    # st.components.v1.html no devuelve eventos del cliente. Devolvemos un
+    # dict vacío para indicar "viewer renderizado, sin click capturable".
+    return {}
 
 
 def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
@@ -1019,38 +1013,8 @@ def _render_corrections_panel(
             order = np.arange(n_patches)
             confidences = np.full(n_patches, np.nan)
 
-        # Input numérico para que el patólogo teclee el #idx que ve en
-        # el hover del visor → el selectbox jumpea ahí con marker 🎯.
-        # Un st.form garantiza que el rerun ocurre solo al pulsar Enter
-        # o el botón, no en cada keystroke (más rápido y menos disruptivo).
-        manual_key = f"manual_patch_{job.job_id}"
-        with st.form(key=f"corr_jump_{job.job_id}", clear_on_submit=False):
-            col_in, col_btn = st.columns([3, 1])
-            with col_in:
-                manual_idx = st.number_input(
-                    "Saltar al parche #",
-                    min_value=0, max_value=n_patches - 1, step=1,
-                    value=int(st.session_state.get(manual_key, 0)),
-                    help=f"Teclea el índice del parche que ves en el hover del visor (0–{n_patches - 1}).",
-                )
-            with col_btn:
-                st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer
-                jumped = st.form_submit_button("🎯 Saltar", use_container_width=True)
-            if jumped:
-                st.session_state[manual_key] = int(manual_idx)
-        target_idx = st.session_state.get(manual_key)
-
-        # Si el patólogo apuntó a un parche concreto, lo movemos al
-        # principio de `order` para que aparezca arriba del selectbox.
-        if target_idx is not None and 0 <= int(target_idx) < n_patches:
-            order_list = [int(x) for x in order]
-            ti = int(target_idx)
-            if ti in order_list:
-                order_list.remove(ti)
-            order_list.insert(0, ti)
-            order = np.array(order_list, dtype=np.int64)
-
-        # Selectbox con opciones formateadas. Top 200 para no saturar.
+        # Selectbox con opciones formateadas. Mostramos hasta 200 para
+        # no saturar el render — los más inciertos van primero.
         max_options = min(200, n_patches)
         labels = []
         for i in order[:max_options]:
@@ -1059,16 +1023,12 @@ def _render_corrections_panel(
             conf = confidences[i_int]
             conf_str = f"{conf:.0%}" if not np.isnan(conf) else "?"
             att = attention[i_int] if i_int < len(attention) else 0.0
-            marker = "🎯 " if (target_idx is not None and i_int == int(target_idx)) else ""
-            labels.append(f"{marker}#{i_int} · {pred_str} ({conf_str}) · α={att:.4f}")
+            labels.append(f"#{i_int} · {pred_str} ({conf_str}) · α={att:.4f}")
 
-        # Key dinámica que cambia con el último target_idx → fuerza a
-        # Streamlit a re-renderizar el selectbox respetando index=0.
         sel_label = st.selectbox(
-            f"Parche a corregir (top {max_options} por incertidumbre · {n_patches} en total)",
+            f"Parche a corregir (ordenados por incertidumbre · top {max_options} de {n_patches})",
             options=labels,
-            index=0,
-            key=f"corr_sel_{job.job_id}_{target_idx}",
+            key=f"corr_sel_{job.job_id}",
         )
         if sel_label is None:
             return
@@ -1340,8 +1300,8 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         )
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
-            "parche para ver `#índice · clase · probs · atención`. "
-            "Para corregir, teclea el `#índice` en el panel de abajo."
+            "parche para ver `#índice · clase · atención`. Las áreas blancas "
+            "son zonas que el filtro de tejido descartó al parchear."
         )
     elif dzi_status == "generating":
         # El thread async de DZI todavía está corriendo. La cola fragment
