@@ -30,6 +30,7 @@ from PIL import Image
 
 from src.corrections import (
     CORRECTION_LABELS,
+    list_corrections,
     record_correction,
     summarize_corrections,
 )
@@ -453,6 +454,7 @@ def _render_openseadragon_viewer(
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
     selected_idx: int | None = None,
+    view_corrected: bool = False,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
     apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
@@ -473,7 +475,6 @@ def _render_openseadragon_viewer(
     # Cargar correcciones existentes para mostrar marcador distintivo
     # en el visor sobre los parches ya corregidos. Deduplicado last-wins
     # por patch_idx — la última corrección registrada es la que cuenta.
-    from src.corrections import list_corrections
     corrections_by_idx: dict[int, str] = {}
     for c in list_corrections(job.job_dir):
         corrections_by_idx[int(c.patch_idx)] = c.label_corr
@@ -537,6 +538,7 @@ def _render_openseadragon_viewer(
     show_pred_js = "true" if show_predictions else "false"
     show_att_js = "true" if show_attention else "false"
     selected_idx_js = "null" if selected_idx is None else str(int(selected_idx))
+    view_corrected_js = "true" if view_corrected else "false"
 
     html = f"""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
@@ -575,8 +577,13 @@ def _render_openseadragon_viewer(
       const SHOW_PRED = {show_pred_js};
       const SHOW_ATT = {show_att_js};
       const SELECTED_IDX = {selected_idx_js};
+      const VIEW_CORRECTED = {view_corrected_js};
       const SVG_NS = "http://www.w3.org/2000/svg";
       const CLASSES = ["ADE", "NOR", "CAR"];
+      const CORR_COLORS = {{
+        "ADE": "rgb(255,127,14)", "NOR": "rgb(46,160,46)", "CAR": "rgb(31,119,180)",
+        "HIP": "rgb(136,136,136)", "ART": "rgb(136,136,136)", "EXCLUDED": "rgb(136,136,136)",
+      }};
 
       viewer.addHandler("open", function() {{
         let selectedOverlay = null;
@@ -596,13 +603,20 @@ def _render_openseadragon_viewer(
             svg.appendChild(fr);
           }}
 
-          // Stroke (predicción): borde del color de la clase predicha del parche.
+          // Stroke (predicción): borde del color de la clase predicha
+          // del parche. Si el toggle 'ver correcciones aplicadas' está
+          // ON y el parche tiene corrección, usamos el color de la
+          // corrección en lugar del de la predicción del modelo.
           if (SHOW_PRED) {{
+            let strokeColor = o.color;
+            if (VIEW_CORRECTED && o.corrected && CORR_COLORS[o.corrected]) {{
+              strokeColor = CORR_COLORS[o.corrected];
+            }}
             const sr = document.createElementNS(SVG_NS, "rect");
             sr.setAttribute("x", "0.015"); sr.setAttribute("y", "0.015");
             sr.setAttribute("width", "0.97"); sr.setAttribute("height", "0.97");
             sr.setAttribute("fill", "none");
-            sr.setAttribute("stroke", o.color);
+            sr.setAttribute("stroke", strokeColor);
             sr.setAttribute("stroke-width", "0.06");
             svg.appendChild(sr);
           }}
@@ -1086,13 +1100,16 @@ def _render_corrections_panel(
         if widget_key not in st.session_state:
             st.session_state[widget_key] = int(order[0]) if len(order) > 0 else 0
 
+        # Set de parches ya corregidos — para excluirlos del cálculo del
+        # 'siguiente más incierto' y para mostrar el toggle informativo.
+        corrected_idxs = {
+            int(c.patch_idx) for c in list_corrections(job.job_dir)
+        }
+
         st.markdown(f"**Parche a corregir** (0–{n_patches - 1})")
         col_idx, col_next = st.columns([2, 1])
         with col_idx:
             # Sin `value=` — la key controla a través de session_state.
-            # Streamlit incrementa automáticamente el session_state[key]
-            # cuando el user pulsa +/- o teclea, y el rerun recoge el
-            # nuevo valor consistentemente.
             patch_idx = int(st.number_input(
                 "Parche a corregir",
                 min_value=0, max_value=n_patches - 1, step=1,
@@ -1101,23 +1118,41 @@ def _render_corrections_panel(
                 label_visibility="collapsed",
             ))
         with col_next:
+            # Saltar al siguiente parche en el ranking de incertidumbre
+            # que NO esté ya corregido. Si todos los del ranking están
+            # corregidos (caso saturado), usamos el siguiente del ranking
+            # ignorando el filtro.
             order_list = [int(x) for x in order]
-            if patch_idx in order_list:
-                cur_pos = order_list.index(patch_idx)
-                next_pos = (cur_pos + 1) % len(order_list)
-                next_uncertain = order_list[next_pos]
-            else:
-                next_uncertain = order_list[0] if order_list else 0
+            cur_pos = order_list.index(patch_idx) if patch_idx in order_list else -1
+            next_uncertain = None
+            for offset in range(1, len(order_list) + 1):
+                cand = order_list[(cur_pos + offset) % len(order_list)]
+                if cand not in corrected_idxs:
+                    next_uncertain = cand
+                    break
+            if next_uncertain is None:
+                # Todos corregidos: simplemente el siguiente del ranking.
+                next_uncertain = order_list[(cur_pos + 1) % len(order_list)] if order_list else 0
+
             if st.button(
                 f"💡 Siguiente más incierto (#{next_uncertain})",
                 key=f"corr_next_{job.job_id}",
                 use_container_width=True,
+                help="Salta los parches que ya tienen corrección registrada.",
             ):
-                # IMPORTANTE: actualizar la key del widget directamente
-                # para que en el siguiente rerun el number_input muestre
-                # el nuevo valor en lugar de retener el anterior.
                 st.session_state[widget_key] = next_uncertain
                 st.rerun()
+
+        # Toggle: ver el visor con la predicción del modelo (default)
+        # vs con las correcciones aplicadas (los parches corregidos
+        # pasan a tener el borde del color de la etiqueta corregida).
+        # El círculo de la esquina sigue visible en ambos modos.
+        st.toggle(
+            "🎨 Mostrar correcciones aplicadas en el visor",
+            key=f"view_corrected_{job.job_id}",
+            help="OFF: bordes con la predicción del modelo (color por clase F4). "
+                 "ON: bordes con la etiqueta corregida (donde la haya).",
+        )
 
         # Info del parche seleccionado: replica el contenido del hover
         # del visor para que el patólogo confirme que va a corregir el
@@ -1391,16 +1426,20 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             int(job.extra.get("dzi_y_min", 0)),
             int(job.extra.get("dzi_x_min", 0)),
         )
-        # Si estamos en modo predicciones y ya se ha seleccionado un parche
-        # en el panel de correcciones, le pasamos al visor `selected_idx`
-        # para que dibuje el borde amarillo y centre la vista en él.
-        # Leemos directamente del session_state del widget number_input
-        # — Streamlit ya lo ha actualizado al entrar a este rerun.
+        # Si estamos en modo predicciones, leemos el target del panel
+        # de correcciones (el number_input) para que el visor dibuje el
+        # borde amarillo y centre la vista en él. También leemos el
+        # toggle 'ver correcciones aplicadas' para repintar bordes con
+        # el color de la corrección.
         sel_idx = None
+        view_corrected_flag = False
         if show_pred:
             widget_key = f"corr_idx_{job.job_id}"
             if widget_key in st.session_state:
                 sel_idx = int(st.session_state[widget_key])
+            view_corrected_flag = bool(
+                st.session_state.get(f"view_corrected_{job.job_id}", False)
+            )
         _render_openseadragon_viewer(
             job,
             positions=positions,
@@ -1412,6 +1451,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             show_attention=show_att,
             dzi_offset=osd_offset,
             selected_idx=sel_idx,
+            view_corrected=view_corrected_flag,
         )
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
