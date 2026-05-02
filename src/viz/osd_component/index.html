@@ -8,13 +8,39 @@
     #viewer { width: 100%; background: transparent; border-radius: 6px; }
     .osd-patch {
       box-sizing: border-box;
-      pointer-events: auto;
-      cursor: pointer;
+      pointer-events: none;
     }
     .osd-patch svg { display: block; width: 100%; height: 100%; pointer-events: none; }
     .osd-patch.osd-selected svg rect.sel-marker { display: block; }
     .osd-patch:not(.osd-selected) svg rect.sel-marker { display: none; }
   </style>
+  <script>
+    /**
+     * Bridge inicial — se registra ANTES de cargar OpenSeadragon para
+     * no perder el primer 'streamlit:render' que pueda llegar mientras
+     * OSD aún está descargándose. Los args pendientes se procesan en
+     * cuanto OSD esté disponible.
+     */
+    window.__pendingArgs = null;
+    window.__sendStreamlit = function(type, payload) {
+      const msg = Object.assign({
+        isStreamlitMessage: true, type: type,
+      }, payload || {});
+      console.log("[osd_viewer] →", type, msg);
+      window.parent.postMessage(msg, "*");
+    };
+    window.addEventListener("message", function(ev) {
+      if (!ev.data || ev.data.type !== "streamlit:render") return;
+      console.log("[osd_viewer] ← streamlit:render", ev.data);
+      const args = (ev.data.args && ev.data.args.args) || ev.data.args || {};
+      window.__pendingArgs = args;
+      if (typeof window.__onRender === "function") {
+        window.__onRender(args);
+      }
+      // Si __onRender no está aún listo, los args quedan en
+      // __pendingArgs y se procesarán al final del script principal.
+    });
+  </script>
 </head>
 <body>
   <div id="viewer"></div>
@@ -22,34 +48,27 @@
   <script src="openseadragon.min.js"></script>
   <script>
     /**
-     * Streamlit path-based component bridge implementado a mano con
-     * postMessage directo. componentReady se envía DESPUÉS de cargar
-     * OpenSeadragon (último statement de este script) — si lo enviamos
-     * antes, el primer 'streamlit:render' que llega encuentra
-     * `OpenSeadragon` undefined y `setupViewer` crashea silenciosamente.
+     * Lógica del visor. Se ejecuta DESPUÉS de cargar OpenSeadragon.
+     * componentReady se envía al final, cuando todo está listo —
+     * cualquier render bufferizado en __pendingArgs se procesa antes.
      *
-     * Captura de clicks: usamos `OpenSeadragon.MouseTracker` por overlay
-     * en lugar de `addEventListener("click", ...)`. OSD captura mouse y
-     * pointer events a nivel del canvas con su propio MouseTracker — los
-     * listeners DOM plain con stopPropagation no consiguen impedirlo.
-     * MouseTracker se integra en el pipeline de OSD y recibe los clicks
-     * antes que el handler de pan/zoom.
+     * Captura de clicks: usamos el evento `canvas-click` del viewer
+     * (no listeners DOM ni MouseTracker por overlay). canvas-click
+     * SIEMPRE se dispara para clicks sobre el visor, y dentro del
+     * handler convertimos las coordenadas del click a coordenadas de
+     * imagen para encontrar qué parche contiene esa posición. Es el
+     * approach más robusto y no depende de pointer-events del overlay.
      */
-    function sendStreamlit(type, payload) {
-      const msg = Object.assign({
-        isStreamlitMessage: true, type: type,
-      }, payload || {});
-      console.log("[osd_viewer] →", type, msg);
-      window.parent.postMessage(msg, "*");
-    }
-
     let viewer = null;
     let initialized = false;
     let selectedIdx = null;
+    let overlaysData = [];
     const strokeRects = new Map();
     const fillRects = new Map();
     const patchDivs = new Map();
     const SVG_NS = "http://www.w3.org/2000/svg";
+
+    const sendStreamlit = window.__sendStreamlit;
 
     function buildOverlayDiv(o) {
       const svg = document.createElementNS(SVG_NS, "svg");
@@ -106,29 +125,21 @@
       return div;
     }
 
-    function attachClickTracker(div, idx) {
-      // OpenSeadragon.MouseTracker se integra con el pipeline de eventos
-      // de OSD. Recibe el click ANTES de que OSD lo interprete como
-      // pan/zoom. clickHandler dispara para clicks "limpios" (sin drag).
-      // dblClickHandler/pressHandler etc. están desactivados — solo
-      // queremos el single click.
-      new OpenSeadragon.MouseTracker({
-        element: div,
-        clickTimeThreshold: 300,
-        clickDistThreshold: 5,
-        clickHandler: function(ev) {
-          updateSelection(idx);
-          console.log("[osd_viewer] click patch", idx);
-          sendStreamlit("streamlit:setComponentValue", {
-            value: { idx: idx, ts: Date.now() },
-            dataType: "json",
-          });
-        },
-      }).setTracking(true);
+    function findPatchAtImageCoords(x, y) {
+      // Busca el primer overlay que contiene la posición (x, y) en
+      // coordenadas de imagen del DZI. overlaysData se rellena en
+      // setupViewer con los items que llegan de Streamlit.
+      for (const o of overlaysData) {
+        if (x >= o.x && x <= o.x + o.size && y >= o.y && y <= o.y + o.size) {
+          return o.idx;
+        }
+      }
+      return null;
     }
 
     function setupViewer(args) {
       const { dzi_url, overlays, height } = args;
+      overlaysData = overlays || [];
       document.getElementById("viewer").style.height = `${height}px`;
       sendStreamlit("streamlit:setFrameHeight", { height: height + 10 });
 
@@ -152,9 +163,8 @@
       });
 
       viewer.addHandler("open", function() {
-        for (const o of overlays) {
+        for (const o of overlaysData) {
           const div = buildOverlayDiv(o);
-          attachClickTracker(div, o.idx);
           viewer.addOverlay({
             element: div,
             location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
@@ -162,6 +172,26 @@
         }
         applyToggles(window.__lastArgs || {});
         if (window.__pendingSelected != null) updateSelection(window.__pendingSelected);
+      });
+
+      // canvas-click: dispara SIEMPRE para clicks limpios sobre el visor,
+      // tanto sobre tile como sobre overlay. event.quick=true significa
+      // click limpio (no parte de un drag). event.position son píxeles
+      // del canvas; convertimos a coords de imagen y buscamos el patch.
+      viewer.addHandler("canvas-click", function(event) {
+        if (!event.quick) return;
+        const viewportPos = viewer.viewport.pointFromPixel(event.position);
+        const imgPos = viewer.viewport.viewportToImageCoordinates(viewportPos);
+        const idx = findPatchAtImageCoords(imgPos.x, imgPos.y);
+        console.log("[osd_viewer] canvas-click", {
+          pixel: event.position, image: imgPos, idx: idx,
+        });
+        if (idx == null) return;
+        updateSelection(idx);
+        sendStreamlit("streamlit:setComponentValue", {
+          value: { idx: idx, ts: Date.now() },
+          dataType: "json",
+        });
       });
     }
 
@@ -201,21 +231,14 @@
       }
       sendStreamlit("streamlit:setFrameHeight", { height: args.height + 10 });
     }
+    // Exponemos onRender al global handler del <head>: si llegó un
+    // render mientras OSD se cargaba, lo procesamos ahora.
+    window.__onRender = onRender;
+    if (window.__pendingArgs) {
+      onRender(window.__pendingArgs);
+      window.__pendingArgs = null;
+    }
 
-    window.addEventListener("message", function(ev) {
-      if (!ev.data || !ev.data.type) return;
-      if (ev.data.type === "streamlit:render") {
-        console.log("[osd_viewer] ← streamlit:render", ev.data);
-        const args = (ev.data.args && ev.data.args.args) || ev.data.args || {};
-        onRender(args);
-      }
-    });
-
-    // componentReady AL FINAL del script — cuando se envía, OpenSeadragon
-    // ya está cargado y todas las funciones (sendStreamlit, setupViewer,
-    // attachClickTracker, etc.) están disponibles en scope global. Si lo
-    // enviáramos antes, el primer 'streamlit:render' que llegara podría
-    // intentar usar OpenSeadragon antes de que el <script src> terminase.
     sendStreamlit("streamlit:componentReady", { apiVersion: 1 });
   </script>
 </body>
