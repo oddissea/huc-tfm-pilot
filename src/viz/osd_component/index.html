@@ -10,9 +10,11 @@
      * fallará pero el iframe se renderiza.
      */
     function sendStreamlit(type, payload) {
-      window.parent.postMessage(Object.assign({
+      const msg = Object.assign({
         isStreamlitMessage: true, type: type,
-      }, payload || {}), "*");
+      }, payload || {});
+      console.log("[osd_viewer] →", type, msg);
+      window.parent.postMessage(msg, "*");
     }
     sendStreamlit("streamlit:componentReady", { apiVersion: 1 });
   </script>
@@ -136,10 +138,14 @@
 
           div.addEventListener("click", function(ev) {
             ev.stopPropagation();
-            // Marcar visualmente el seleccionado y enviar el click a Streamlit
+            // Marcar visualmente el seleccionado y enviar el click a Streamlit.
+            // Streamlit espera `dataType: "json"` para procesar el value
+            // — sin ese campo el mensaje se descarta silenciosamente.
             updateSelection(o.idx);
+            console.log("[osd_viewer] click patch", o.idx);
             sendStreamlit("streamlit:setComponentValue", {
-              value: { idx: o.idx, ts: Date.now() }
+              value: { idx: o.idx, ts: Date.now() },
+              dataType: "json",
             });
           });
 
@@ -199,6 +205,7 @@
     window.addEventListener("message", function(ev) {
       if (!ev.data || !ev.data.type) return;
       if (ev.data.type === "streamlit:render") {
+        console.log("[osd_viewer] ← streamlit:render", ev.data);
         const args = (ev.data.args && ev.data.args.args) || ev.data.args || {};
         onRender(args);
       }
