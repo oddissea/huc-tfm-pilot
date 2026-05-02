@@ -102,6 +102,14 @@ def _do_preprocess(manager: JobManager, job: Job) -> None:
         else:
             raise ValueError(f"Tipo de input desconocido: {job.input_type}")
 
+        # Privacy (M4.6): borrar el fichero crudo en cuanto input.h5
+        # está garantizado. Reduce la ventana de exposición a ~segundos.
+        # El DZI async lee de input.h5, no de raw, así que esto no
+        # interfiere con la generación del visor.
+        if job.raw_path.exists():
+            job.raw_path.unlink()
+            extra["raw_deleted"] = True
+
         # Marcar que vamos a empezar a generar el DZI (la UI muestra
         # spinner) ANTES de pasar a READY_FOR_INFERENCE.
         extra["dzi_status"] = "generating"
@@ -123,6 +131,14 @@ def _do_preprocess(manager: JobManager, job: Job) -> None:
 
     except Exception as e:
         logger.exception("Job %s falló en preprocesado", job.short_id)
+        # Privacy (M4.6): incluso si la conversión falla, el raw no debe
+        # quedarse residual en disco. El usuario lo verá como FAILED y
+        # podrá re-subirlo si quiere.
+        if job.raw_path.exists():
+            try:
+                job.raw_path.unlink()
+            except OSError:
+                logger.warning("Job %s: no pude borrar raw residual", job.short_id)
         manager.update_status(
             job.job_id,
             JobStatus.FAILED,
