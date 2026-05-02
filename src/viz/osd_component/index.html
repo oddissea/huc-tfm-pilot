@@ -317,55 +317,69 @@
         if (newSel) newSel.style.display = "block";
       }
 
-      // Pan + (zoom condicional) al parche seleccionado.
-      // Si el patólogo todavía está cerca del zoom inicial (vista
-      // panorámica), aplicamos zoom 3x para destacar el parche.
-      // Si ya ha hecho zoom manual (está examinando algo en detalle),
-      // solo paneamos sin tocar el zoom — preservamos su contexto.
-      // Threshold: zoom_actual < 1.5 × home_zoom = "sin zoom".
+      // Pan + zoom al parche seleccionado SOLO cuando el patólogo
+      // todavía está cerca del zoom inicial (vista panorámica). Si ya
+      // hizo zoom manual (está examinando algo en detalle), no hacemos
+      // nada — preservamos su contexto visual completo. Solo el borde
+      // amarillo cambia de sitio. Threshold: 1.5 × home_zoom.
       if (viewer && viewer.world && viewer.world.getItemCount() > 0 && idx != null) {
         const o = overlaysData.find(x => x.idx === idx);
         if (o) {
           try {
-            const target = viewer.viewport.imageToViewportCoordinates(
-              o.x + o.size / 2, o.y + o.size / 2
-            );
             const homeZoom = viewer.viewport.getHomeZoom();
             const currentZoom = viewer.viewport.getZoom();
             if (currentZoom < homeZoom * 1.5) {
+              const target = viewer.viewport.imageToViewportCoordinates(
+                o.x + o.size / 2, o.y + o.size / 2
+              );
               viewer.viewport.zoomTo(homeZoom * 3.0, target, true);
+              viewer.viewport.panTo(target, true);
             }
-            viewer.viewport.panTo(target, true);
           } catch (e) {
-            console.warn("[osd_viewer] panTo failed:", e);
+            console.warn("[osd_viewer] zoom/pan failed:", e);
           }
         }
       }
+
+      // Refrescar visibilidad de strokeRect/selRect según el toggle
+      // 'bordes off' (puede haber cambiado al seleccionar otro parche).
+      applyToggles(window.__lastArgs || {});
     }
 
     function applyToggles(args) {
       const showPred = args.show_predictions !== false;
       const showAtt = args.show_attention === true;
-      // CRÍTICO: actualizar viewCorrected también al refrescar toggles.
-      // Sin esto, cambiar el toggle 'ver correcciones aplicadas' no
-      // tenía efecto porque applyToggles solo cambiaba show_pred / show_att
-      // sin recalcular el strokeColor de los strokeRects existentes.
+      const showSelBorders = args.show_selected_borders !== false;  // default true
       viewCorrected = args.view_corrected === true;
 
       for (const o of overlaysData) {
+        const isSelected = (selectedIdx != null && o.idx === selectedIdx);
+        // Para el parche seleccionado, ocultar tanto strokeRect (borde
+        // de etiqueta) como selRect (borde amarillo) si el patólogo
+        // pidió 'bordes off' — para examinar el parche limpio.
+        const hideForExamen = isSelected && !showSelBorders;
+
         const sr = strokeRects.get(o.idx);
         if (sr) {
-          // Recalcular el color del borde según el toggle actual.
           let strokeColor = o.color;
           if (viewCorrected && o.corrected && CORR_COLORS[o.corrected]) {
             strokeColor = CORR_COLORS[o.corrected];
           }
           sr.setAttribute("stroke", strokeColor);
-          sr.style.display = showPred ? "" : "none";
+          sr.style.display = (showPred && !hideForExamen) ? "" : "none";
         }
         const fr = fillRects.get(o.idx);
         if (fr) {
           fr.style.display = showAtt ? "" : "none";
+        }
+        // selRect amarillo del seleccionado: visible solo si está
+        // seleccionado Y bordes ON.
+        const div = patchDivs.get(o.idx);
+        if (div) {
+          const sel = div.querySelector("rect.sel-marker");
+          if (sel) {
+            sel.style.display = (isSelected && showSelBorders) ? "block" : "none";
+          }
         }
       }
     }

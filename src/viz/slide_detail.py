@@ -463,6 +463,7 @@ def _render_openseadragon_viewer(
     height: int = 620,
     selected_idx: int | None = None,
     view_corrected: bool = False,
+    show_selected_borders: bool = True,
     enable_click_capture: bool = False,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
@@ -553,6 +554,7 @@ def _render_openseadragon_viewer(
             show_attention=show_attention,
             selected_idx=selected_idx,
             view_corrected=view_corrected,
+            show_selected_borders=show_selected_borders,
             key=f"osd_{job.job_id}",
         )
 
@@ -1177,12 +1179,23 @@ def _render_corrections_panel(
 
         # Toggle: ver el visor con la predicción del modelo (default)
         # vs con las correcciones aplicadas. Disponible siempre.
-        st.toggle(
-            "🎨 Mostrar correcciones aplicadas en el visor",
-            key=f"view_corrected_{job.job_id}",
-            help="OFF: bordes con la predicción del modelo (color por clase F4). "
-                 "ON: bordes con la etiqueta corregida (donde la haya).",
-        )
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.toggle(
+                "🎨 Mostrar correcciones aplicadas en el visor",
+                key=f"view_corrected_{job.job_id}",
+                help="OFF: bordes con la predicción del modelo (color por clase F4). "
+                     "ON: bordes con la etiqueta corregida (donde la haya).",
+            )
+        with col_t2:
+            st.toggle(
+                "🔲 Bordes del parche seleccionado",
+                value=True,
+                key=f"show_sel_borders_{job.job_id}",
+                help="OFF: oculta el borde de etiqueta y el highlight amarillo "
+                     "del parche seleccionado para examinarlo sin ruido visual. "
+                     "El círculo de 'corregido' (esquina) sigue siempre visible.",
+            )
 
         # Sin parche seleccionado: pista para empezar + saltamos a
         # renderizar el resumen al final (sin etiquetar / guardar).
@@ -1541,6 +1554,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         # el color de la corrección.
         sel_idx = None
         view_corrected_flag = False
+        show_sel_borders_flag = True
         if show_pred:
             widget_key = f"corr_idx_{job.job_id}"
             pending_key = f"corr_pending_target_{job.job_id}"
@@ -1556,6 +1570,9 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                     sel_idx = int(v)
             view_corrected_flag = bool(
                 st.session_state.get(f"view_corrected_{job.job_id}", False)
+            )
+            show_sel_borders_flag = bool(
+                st.session_state.get(f"show_sel_borders_{job.job_id}", True)
             )
         # En modo predicciones, usar el custom component (con click
         # capture). En modo atención, mantener el inline (más simple,
@@ -1573,6 +1590,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             dzi_offset=osd_offset,
             selected_idx=sel_idx,
             view_corrected=view_corrected_flag,
+            show_selected_borders=show_sel_borders_flag,
             enable_click_capture=show_pred,
         )
 
