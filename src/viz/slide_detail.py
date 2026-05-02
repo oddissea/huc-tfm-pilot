@@ -33,7 +33,6 @@ from src.corrections import (
     record_correction,
     summarize_corrections,
 )
-from src.viz.osd_component import osd_viewer
 
 if TYPE_CHECKING:
     from src.jobs.manager import Job
@@ -453,28 +452,30 @@ def _render_openseadragon_viewer(
     show_attention: bool = False,
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
-    selected_idx: int | None = None,
-) -> dict | None:
-    """Renderiza el visor OpenSeadragon apuntando al DZI del job, con
-    overlays SVG por parche (predicción + atención) y captura de clicks.
+) -> None:
+    """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
+    apuntando a `/dzi/<job_id>/slide.dzi`. Si se pasan posiciones +
+    predicciones, dibuja un overlay SVG con un rectángulo del color de la
+    clase predicha sobre cada parche en sus coordenadas del WSI stitched.
 
-    Devuelve el último click sobre un parche en formato `{"idx", "ts"}`
-    cuando el patólogo clica un parche, None si todavía no hubo click o
-    si no hay DZI. El `ts` cambia entre clicks consecutivos sobre el
-    mismo parche para forzar rerun de Streamlit.
+    Implementación con `st.components.v1.html` inline (no custom component):
+    el custom component path-based daba problemas de timing con la carga
+    del iframe (visor solo aparecía tras redimensionar la ventana) y
+    requería bridge JS extra. El inline carga al primer intento sin
+    requerimientos especiales, a cambio de no poder capturar clicks.
+    Los clicks no son críticos: el panel de correcciones tiene un
+    `st.number_input` que el patólogo usa para teclear el #idx que ve
+    en el hover del visor.
 
-    `selected_idx` permite sincronizar la selección desde fuera (p. ej.
-    desde el selectbox del panel de correcciones): el parche con ese
-    índice se marca con un highlight amarillo en el visor.
-
-    nginx sirve `queue/<job_id>/` como static bajo `/dzi/<job_id>/`.
-    El navegador hereda BasicAuth same-origin para los tiles.
+    nginx sirve `queue/<job_id>/` como static bajo `/dzi/<job_id>/`
+    (ver `nginx.conf` location /dzi/). El navegador hereda BasicAuth
+    same-origin para los tiles.
     """
     if not job.dzi_path.exists():
-        return None
+        return
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
-    overlays = []
+    overlays_json = "[]"
     y_off, x_off = dzi_offset
     sr, sg, sb = CLASS_COLORS_RGB.get(slide_pred_class, (0.5, 0.5, 0.5))
 
@@ -490,6 +491,7 @@ def _render_openseadragon_viewer(
             and patch_raw_size is not None and len(positions) == len(pred_index)):
         att_arr = np.asarray(attention) if attention is not None else None
         att_max = float(att_arr.max()) if (att_arr is not None and att_arr.size > 0) else 0.0
+        items = []
         for i, (pos, p) in enumerate(zip(positions, pred_index)):
             cls = CLASS_NAMES[int(p)]
             r, g, b = CLASS_COLORS_RGB[cls]
@@ -501,7 +503,8 @@ def _render_openseadragon_viewer(
                 "color": color,
                 "idx": i,
                 "cls": cls,
-                "pos": [int(pos[0]), int(pos[1])],
+                "pos_y": int(pos[0]),
+                "pos_x": int(pos[1]),
             }
             if att_arr is not None:
                 a = float(att_arr[i])
@@ -514,17 +517,99 @@ def _render_openseadragon_viewer(
                 )
             if pred_probs_arr is not None:
                 item["probs"] = [round(float(v), 3) for v in pred_probs_arr[i]]
-            overlays.append(item)
+            items.append(item)
+        overlays_json = json.dumps(items)
 
-    return osd_viewer(
-        dzi_url=dzi_url,
-        overlays=overlays,
-        height=height,
-        show_predictions=show_predictions,
-        show_attention=show_attention,
-        selected_idx=selected_idx,
-        key=f"osd_{job.job_id}",
-    )
+    show_pred_js = "true" if show_predictions else "false"
+    show_att_js = "true" if show_attention else "false"
+
+    html = f"""
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
+    <style>
+      .osd-patch {{ box-sizing: border-box; pointer-events: auto; }}
+      .osd-patch svg {{ display: block; width: 100%; height: 100%; pointer-events: none; }}
+    </style>
+    <div id="osd-{job.job_id}" style="width:100%;height:{height}px;background:transparent;border-radius:6px;"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+    <script>
+      const viewer = OpenSeadragon({{
+        id: "osd-{job.job_id}",
+        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/images/",
+        tileSources: "{dzi_url}",
+        background: "transparent",
+        showNavigator: true,
+        navigatorPosition: "BOTTOM_RIGHT",
+        navigatorHeight: 100,
+        navigatorWidth: 130,
+        gestureSettingsMouse: {{ scrollToZoom: true, clickToZoom: false }},
+        showRotationControl: false,
+        animationTime: 0.5,
+        immediateRender: true,
+        crossOriginPolicy: "Anonymous",
+        loadTilesWithAjax: true,
+        ajaxWithCredentials: true,
+        maxZoomPixelRatio: 5,
+      }});
+
+      const overlays = {overlays_json};
+      const SHOW_PRED = {show_pred_js};
+      const SHOW_ATT = {show_att_js};
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const CLASSES = ["ADE", "NOR", "CAR"];
+
+      viewer.addHandler("open", function() {{
+        for (const o of overlays) {{
+          const svg = document.createElementNS(SVG_NS, "svg");
+          svg.setAttribute("viewBox", "0 0 1 1");
+          svg.setAttribute("preserveAspectRatio", "none");
+
+          if (SHOW_ATT && o.att_fill) {{
+            const fr = document.createElementNS(SVG_NS, "rect");
+            fr.setAttribute("x", "0"); fr.setAttribute("y", "0");
+            fr.setAttribute("width", "1"); fr.setAttribute("height", "1");
+            fr.setAttribute("fill", o.att_fill);
+            fr.setAttribute("stroke", "none");
+            svg.appendChild(fr);
+          }}
+
+          if (SHOW_PRED) {{
+            const sr = document.createElementNS(SVG_NS, "rect");
+            sr.setAttribute("x", "0.015"); sr.setAttribute("y", "0.015");
+            sr.setAttribute("width", "0.97"); sr.setAttribute("height", "0.97");
+            sr.setAttribute("fill", "none");
+            sr.setAttribute("stroke", o.color);
+            sr.setAttribute("stroke-width", "0.06");
+            svg.appendChild(sr);
+          }}
+
+          const div = document.createElement("div");
+          div.className = "osd-patch";
+          let lines = [
+            `parche #${{o.idx}}`,
+            `predicción F4: ${{o.cls}}`,
+          ];
+          if (o.probs) {{
+            const parts = o.probs.map((p, i) => `${{CLASSES[i]}}=${{p.toFixed(3)}}`);
+            lines.push(`probs F4: ${{parts.join(" · ")}}`);
+          }}
+          if (o.att !== undefined) {{
+            const pct = (o.att_rel * 100).toFixed(0);
+            lines.push(`atención AttnMIL: ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`);
+          }}
+          lines.push(`posición: y=${{o.pos_y}}, x=${{o.pos_x}}`);
+          div.title = lines.join("\\n");
+          div.appendChild(svg);
+
+          viewer.addOverlay({{
+            element: div,
+            location: viewer.viewport.imageToViewportRectangle(o.x, o.y, o.size, o.size),
+          }});
+        }}
+      }});
+    </script>
+    """
+    import streamlit.components.v1 as components
+    components.html(html, height=height + 20, scrolling=False)
 
 
 def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
@@ -909,17 +994,35 @@ def _render_corrections_panel(
             order = np.arange(n_patches)
             confidences = np.full(n_patches, np.nan)
 
-        # Si el patólogo cliqueó un parche en el visor, lo movemos al
+        # Input numérico para que el patólogo teclee el #idx que ve en
+        # el hover del visor → el selectbox jumpea ahí con marker 🎯.
+        # Un st.form garantiza que el rerun ocurre solo al pulsar Enter
+        # o el botón, no en cada keystroke (más rápido y menos disruptivo).
+        manual_key = f"manual_patch_{job.job_id}"
+        with st.form(key=f"corr_jump_{job.job_id}", clear_on_submit=False):
+            col_in, col_btn = st.columns([3, 1])
+            with col_in:
+                manual_idx = st.number_input(
+                    "Saltar al parche #",
+                    min_value=0, max_value=n_patches - 1, step=1,
+                    value=int(st.session_state.get(manual_key, 0)),
+                    help=f"Teclea el índice del parche que ves en el hover del visor (0–{n_patches - 1}).",
+                )
+            with col_btn:
+                st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer
+                jumped = st.form_submit_button("🎯 Saltar", use_container_width=True)
+            if jumped:
+                st.session_state[manual_key] = int(manual_idx)
+        target_idx = st.session_state.get(manual_key)
+
+        # Si el patólogo apuntó a un parche concreto, lo movemos al
         # principio de `order` para que aparezca arriba del selectbox.
-        # Así el selectbox siempre tiene el parche cliqueado en el top
-        # — sin necesidad de scroll ni búsqueda manual.
-        clicked_idx = st.session_state.get(f"clicked_patch_{job.job_id}")
-        if clicked_idx is not None and 0 <= int(clicked_idx) < n_patches:
+        if target_idx is not None and 0 <= int(target_idx) < n_patches:
             order_list = [int(x) for x in order]
-            ci = int(clicked_idx)
-            if ci in order_list:
-                order_list.remove(ci)
-            order_list.insert(0, ci)
+            ti = int(target_idx)
+            if ti in order_list:
+                order_list.remove(ti)
+            order_list.insert(0, ti)
             order = np.array(order_list, dtype=np.int64)
 
         # Selectbox con opciones formateadas. Top 200 para no saturar.
@@ -931,20 +1034,16 @@ def _render_corrections_panel(
             conf = confidences[i_int]
             conf_str = f"{conf:.0%}" if not np.isnan(conf) else "?"
             att = attention[i_int] if i_int < len(attention) else 0.0
-            marker = "🎯 " if (clicked_idx is not None and i_int == int(clicked_idx)) else ""
+            marker = "🎯 " if (target_idx is not None and i_int == int(target_idx)) else ""
             labels.append(f"{marker}#{i_int} · {pred_str} ({conf_str}) · α={att:.4f}")
 
-        # Key dinámica que cambia con el último ts de click → fuerza a
-        # Streamlit a re-renderizar el selectbox respetando el index=0
-        # (el clicked_idx que acabamos de poner al principio). Sin esto,
-        # session_state retiene el valor anterior y el index pasado se
-        # ignora.
-        last_ts = st.session_state.get(f"last_click_ts_{job.job_id}", 0)
+        # Key dinámica que cambia con el último target_idx → fuerza a
+        # Streamlit a re-renderizar el selectbox respetando index=0.
         sel_label = st.selectbox(
-            f"Parche a corregir (cliquea en el visor o elige por incertidumbre · top {max_options} de {n_patches})",
+            f"Parche a corregir (top {max_options} por incertidumbre · {n_patches} en total)",
             options=labels,
             index=0,
-            key=f"corr_sel_{job.job_id}_{last_ts}",
+            key=f"corr_sel_{job.job_id}_{target_idx}",
         )
         if sel_label is None:
             return
@@ -1203,14 +1302,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             int(job.extra.get("dzi_y_min", 0)),
             int(job.extra.get("dzi_x_min", 0)),
         )
-        # Sincronización bidireccional click↔selectbox: el visor recibe el
-        # índice seleccionado actual (vía session_state) para resaltarlo
-        # con un marker amarillo, y devuelve el último click para que
-        # el panel de correcciones jumpee a ese parche en el selectbox.
-        clicked_key = f"clicked_patch_{job.job_id}"
-        last_ts_key = f"last_click_ts_{job.job_id}"
-        selected_now = st.session_state.get(clicked_key)
-        clicked = _render_openseadragon_viewer(
+        _render_openseadragon_viewer(
             job,
             positions=positions,
             pred_index=pred_index,
@@ -1220,19 +1312,11 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             show_predictions=show_pred,
             show_attention=show_att,
             dzi_offset=osd_offset,
-            selected_idx=selected_now,
         )
-        # Si llegó un click nuevo (ts distinto al último visto), actualizar
-        # session_state y rerun para que el panel de correcciones lo recoja.
-        if isinstance(clicked, dict) and "ts" in clicked:
-            if st.session_state.get(last_ts_key) != clicked["ts"]:
-                st.session_state[last_ts_key] = clicked["ts"]
-                st.session_state[clicked_key] = int(clicked["idx"])
-                st.rerun()
         st.caption(
-            "Click en un parche para seleccionarlo en el panel de "
-            "correcciones. Pan con arrastrar, zoom con rueda. Hover muestra "
-            "clase, probs F4, atención y posición."
+            "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "
+            "parche para ver `#índice · clase · probs · atención`. "
+            "Para corregir, teclea el `#índice` en el panel de abajo."
         )
     elif dzi_status == "generating":
         # El thread async de DZI todavía está corriendo. La cola fragment
