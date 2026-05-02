@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.css">
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+    html, body { margin: 0; padding: 0; height: 100%; background: transparent; font-family: system-ui, sans-serif; }
     #viewer { width: 100%; background: transparent; border-radius: 6px; }
     .osd-patch {
       box-sizing: border-box;
@@ -12,6 +12,8 @@
       cursor: pointer;
     }
     .osd-patch svg { display: block; width: 100%; height: 100%; pointer-events: none; }
+    .osd-patch.osd-selected svg rect.sel-marker { display: block; }
+    .osd-patch:not(.osd-selected) svg rect.sel-marker { display: none; }
   </style>
 </head>
 <body>
@@ -19,19 +21,30 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
   <script>
-    // Streamlit component bridge.
+    /**
+     * Streamlit path-based component bridge implementado a mano con
+     * postMessage directo. No depende del SDK de streamlit-component-lib
+     * (que no se carga automáticamente en componentes path-based, lo cual
+     * fue la causa del fallo en sesión #54).
+     */
+    function sendStreamlit(type, payload) {
+      window.parent.postMessage(Object.assign({
+        isStreamlitMessage: true, type: type,
+      }, payload || {}), "*");
+    }
+
     let viewer = null;
     let initialized = false;
-    // Mapas idx → DOM nodes (rect del borde, rect del fill) para no
-    // recrear overlays en cada cambio de toggle.
+    let selectedIdx = null;
     const strokeRects = new Map();
     const fillRects = new Map();
+    const patchDivs = new Map();
     const SVG_NS = "http://www.w3.org/2000/svg";
 
     function setupViewer(args) {
       const { dzi_url, overlays, height } = args;
       document.getElementById("viewer").style.height = `${height}px`;
-      Streamlit.setFrameHeight(height + 10);
+      sendStreamlit("streamlit:setFrameHeight", { height: height + 10 });
 
       viewer = OpenSeadragon({
         id: "viewer",
@@ -49,19 +62,19 @@
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
+        maxZoomPixelRatio: 5,
       });
 
       viewer.addHandler("open", function() {
         for (const o of overlays) {
-          // SVG con dos rects superpuestos:
-          //   - fill rect (color de la clase predicha del slide, alpha=atención)
-          //   - stroke rect (borde del color de la clase predicha del PARCHE)
-          // Cada uno se enciende/apaga con su toggle.
+          // SVG con tres rects superpuestos:
+          //   - fillRect (atención): color de la clase del slide, alpha=atención.
+          //   - strokeRect (predicción): borde del color de la clase predicha del PARCHE.
+          //   - selRect (selección): borde amarillo grueso, sólo visible si idx == selectedIdx.
           const svg = document.createElementNS(SVG_NS, "svg");
           svg.setAttribute("viewBox", "0 0 1 1");
           svg.setAttribute("preserveAspectRatio", "none");
 
-          // Fill (atención)
           const fillRect = document.createElementNS(SVG_NS, "rect");
           fillRect.setAttribute("x", "0");
           fillRect.setAttribute("y", "0");
@@ -73,7 +86,6 @@
           svg.appendChild(fillRect);
           fillRects.set(o.idx, fillRect);
 
-          // Stroke (predicción)
           const strokeRect = document.createElementNS(SVG_NS, "rect");
           strokeRect.setAttribute("x", "0.015");
           strokeRect.setAttribute("y", "0.015");
@@ -85,19 +97,41 @@
           svg.appendChild(strokeRect);
           strokeRects.set(o.idx, strokeRect);
 
+          // Marker de selección (amarillo grueso) — visible sólo cuando
+          // el parche es el selectedIdx actual.
+          const selRect = document.createElementNS(SVG_NS, "rect");
+          selRect.setAttribute("x", "0.04");
+          selRect.setAttribute("y", "0.04");
+          selRect.setAttribute("width", "0.92");
+          selRect.setAttribute("height", "0.92");
+          selRect.setAttribute("fill", "none");
+          selRect.setAttribute("stroke", "#fff200");
+          selRect.setAttribute("stroke-width", "0.06");
+          selRect.setAttribute("class", "sel-marker");
+          selRect.style.display = "none";
+          svg.appendChild(selRect);
+
           const div = document.createElement("div");
           div.className = "osd-patch";
-          let tip = `#${o.idx} · ${o.cls}`;
+          let tip = `parche #${o.idx}`;
+          if (o.cls) tip += `\nclase predicha: ${o.cls}`;
+          if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} NOR=${o.probs[1].toFixed(3)} CAR=${o.probs[2].toFixed(3)}`;
           if (o.att !== undefined) {
             const pct = (o.att_rel * 100).toFixed(0);
-            tip += ` · atención ${o.att.toFixed(4)} (${pct}% del máximo)`;
+            tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
           }
+          if (o.pos) tip += `\nposición (y,x): (${o.pos[0]}, ${o.pos[1]})`;
           div.title = tip;
           div.appendChild(svg);
+          patchDivs.set(o.idx, div);
 
           div.addEventListener("click", function(ev) {
             ev.stopPropagation();
-            Streamlit.setComponentValue({ idx: o.idx, ts: Date.now() });
+            // Marcar visualmente el seleccionado y enviar el click a Streamlit
+            updateSelection(o.idx);
+            sendStreamlit("streamlit:setComponentValue", {
+              value: { idx: o.idx, ts: Date.now() }
+            });
           });
 
           viewer.addOverlay({
@@ -106,12 +140,24 @@
           });
         }
         applyToggles(window.__lastArgs || {});
+        if (window.__pendingSelected != null) updateSelection(window.__pendingSelected);
       });
     }
 
+    function updateSelection(idx) {
+      // Quita la marca del anterior, pone la del nuevo
+      if (selectedIdx != null && patchDivs.has(selectedIdx)) {
+        patchDivs.get(selectedIdx).classList.remove("osd-selected");
+      }
+      selectedIdx = idx;
+      if (idx != null && patchDivs.has(idx)) {
+        patchDivs.get(idx).classList.add("osd-selected");
+      }
+    }
+
     function applyToggles(args) {
-      const showPred = args.show_predictions !== false;   // default true
-      const showAtt = args.show_attention === true;       // default false
+      const showPred = args.show_predictions !== false;
+      const showAtt = args.show_attention === true;
       for (const r of strokeRects.values()) {
         r.style.display = showPred ? "" : "none";
       }
@@ -120,21 +166,37 @@
       }
     }
 
-    function onRender(event) {
-      const args = event.detail.args;
+    function onRender(args) {
       window.__lastArgs = args;
       if (!initialized) {
         setupViewer(args);
         initialized = true;
       } else {
-        // Solo cambian los toggles → no recreamos overlays
         applyToggles(args);
       }
-      Streamlit.setFrameHeight(args.height + 10);
+      // El parent puede pedirnos que pre-seleccionemos un patch (cuando
+      // viene del session_state de Streamlit, p. ej. si el patólogo
+      // editó el selectbox manualmente y queremos sincronizar).
+      const externallySelected = args.selected_idx;
+      if (externallySelected != null) {
+        if (initialized && patchDivs.size > 0) updateSelection(externallySelected);
+        else window.__pendingSelected = externallySelected;
+      }
+      sendStreamlit("streamlit:setFrameHeight", { height: args.height + 10 });
     }
 
-    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-    Streamlit.setComponentReady();
+    // Listener del puente de Streamlit. Recibimos `streamlit:render` con
+    // los args declarados en Python.
+    window.addEventListener("message", function(ev) {
+      if (!ev.data || !ev.data.type) return;
+      if (ev.data.type === "streamlit:render") {
+        const args = (ev.data.args && ev.data.args.args) || ev.data.args || {};
+        onRender(args);
+      }
+    });
+
+    // Avisamos al parent de que estamos listos para recibir renders.
+    sendStreamlit("streamlit:componentReady", { apiVersion: 1 });
   </script>
 </body>
 </html>

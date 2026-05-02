@@ -4,8 +4,10 @@ Devuelve `{"idx": int, "ts": int}` cuando el usuario hace click sobre un
 parche del visor. El `ts` (timestamp del browser) sirve para que Streamlit
 detecte cambios aunque el usuario clique repetidamente el mismo parche.
 
-Estructura: este archivo + carpeta hermana `osd_component/index.html`.
-Streamlit sirve el HTML estático a través de su propio handler.
+El path-based component se construye contra `osd_component/index.html`,
+que implementa el bridge de Streamlit a mano con `postMessage` (no usa
+`streamlit-component-lib` porque el SDK no se carga automáticamente en
+componentes path-based — fue la causa del fallo en sesión #54).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ def osd_viewer(
     height: int = 620,
     show_predictions: bool = True,
     show_attention: bool = False,
+    selected_idx: int | None = None,
     key: str | None = None,
 ) -> dict | None:
     """Renderiza el visor OpenSeadragon con click-events y toggles.
@@ -31,21 +34,29 @@ def osd_viewer(
     Args:
         dzi_url: URL del fichero `.dzi` (relativa al host del piloto).
         overlays: lista de dicts con keys `x, y, size, color, idx, cls`
-                  y opcionalmente `att, att_rel, att_fill`. Coordenadas
-                  en píxeles del DZI (después de restar el offset stitched).
-                  - `color` = stroke (borde) cuando se muestra predicciones.
-                  - `att_fill` = fill rgba(...) — color de la clase del
-                    slide con alpha proporcional a la atención. Se usa
-                    cuando se muestra atención.
+                  y opcionalmente `att, att_rel, att_fill, probs, pos`.
+                  Coordenadas en píxeles del DZI (después de restar el
+                  offset stitched).
+                  - `color`: stroke (borde) cuando se muestra predicciones.
+                  - `att_fill`: fill rgba(...) — color de la clase del slide
+                    con alpha proporcional a la atención. Visible sólo en
+                    modo atención.
+                  - `probs`: [p_ADE, p_NOR, p_CAR] del classifier F4 para el
+                    parche, mostrado en el hover.
+                  - `pos`: [y, x] en píxeles del slide stitched, para hover.
         height: altura del visor en px.
         show_predictions: si True (default), dibuja borde por predicción.
         show_attention: si True, dibuja relleno coloreado por atención.
-                        Default False (la predicción es la vista por defecto).
+        selected_idx: si se pasa, marca ese parche con el highlight amarillo
+                      de selección al renderizar (sincroniza estado externo
+                      con el visor — p. ej. el selectbox del panel de
+                      correcciones).
         key: identificador único entre instancias del componente.
 
     Returns:
         None si todavía no ha habido click. `{"idx": <int>, "ts": <int>}`
-        del último click.
+        del último click. El `ts` cambia entre clicks consecutivos sobre
+        el mismo parche para forzar el rerun de Streamlit.
     """
     return _osd_component(
         dzi_url=dzi_url,
@@ -53,6 +64,7 @@ def osd_viewer(
         height=height,
         show_predictions=show_predictions,
         show_attention=show_attention,
+        selected_idx=selected_idx,
         key=key,
         default=None,
     )
