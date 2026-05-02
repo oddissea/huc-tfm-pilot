@@ -164,9 +164,10 @@
       // de un drag de pan.
       div.addEventListener("click", function(ev) {
         ev.stopPropagation();
-        // markSelected: solo amarillo, sin pan/zoom. Ya estás mirando
-        // ahí, mover la vista despista.
-        markSelected(o.idx);
+        // panIfZoomed=false: si el patólogo ya hizo zoom, no movemos
+        // (está mirando ahí). Si NO hay zoom, igualmente aplicamos
+        // zoom 3x para destacar (lógica unificada en selectPatch).
+        selectPatch(o.idx, false);
         console.log("[osd_viewer] div-click", o.idx);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: o.idx, ts: Date.now() },
@@ -292,7 +293,7 @@
         const idx = findPatchAtImageCoords(imgPos.x, imgPos.y);
         if (idx == null) return;
         console.log("[osd_viewer] canvas-click fallback", idx);
-        markSelected(idx);
+        selectPatch(idx, false);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: idx, ts: Date.now() },
           dataType: "json",
@@ -300,10 +301,21 @@
       });
     }
 
-    function markSelected(idx) {
-      // Solo cambia el highlight amarillo (clase + display del rect).
-      // No mueve la vista. Usado por el click directo en el visor:
-      // el patólogo ya está mirando ese sitio, mover sería despistar.
+    function selectPatch(idx, panIfZoomed) {
+      // Cambia el highlight amarillo (siempre) + lógica condicional
+      // de pan/zoom según el zoom actual y si el caller quiere panear
+      // cuando ya hay zoom.
+      //
+      // Casos:
+      // - Vista panorámica (sin zoom previo): SIEMPRE aplicamos zoom 3x
+      //   + pan. Tanto click como botón quieren destacar el parche.
+      // - Con zoom previo:
+      //   * Click directo (panIfZoomed=false): nada — el patólogo ya
+      //     está mirando ese sitio, mover despista.
+      //   * Botón siguiente (panIfZoomed=true): pan al parche manteniendo
+      //     el zoom — está navegando.
+
+      // Highlight amarillo
       if (selectedIdx != null && patchDivs.has(selectedIdx)) {
         const prev = patchDivs.get(selectedIdx);
         prev.classList.remove("osd-selected");
@@ -318,16 +330,8 @@
         if (newSel) newSel.style.display = "block";
       }
       applyToggles(window.__lastArgs || {});
-    }
 
-    function navigateToSelected(idx) {
-      // markSelected + pan al parche. Si el patólogo no había hecho
-      // zoom (vista panorámica), también aplica zoom 3x. Si ya tenía
-      // zoom manual, mantiene ese nivel y solo panea hasta el nuevo
-      // parche. Usado por el botón 'siguiente más incierto' y por
-      // cambios del number_input — el patólogo está navegando, quiere
-      // ver el nuevo parche.
-      markSelected(idx);
+      // Pan/zoom condicional
       if (viewer && viewer.world && viewer.world.getItemCount() > 0 && idx != null) {
         const o = overlaysData.find(x => x.idx === idx);
         if (o) {
@@ -337,12 +341,15 @@
             );
             const homeZoom = viewer.viewport.getHomeZoom();
             const currentZoom = viewer.viewport.getZoom();
-            if (currentZoom < homeZoom * 1.5) {
+            const isPanoramic = currentZoom < homeZoom * 1.5;
+            if (isPanoramic) {
               viewer.viewport.zoomTo(homeZoom * 3.0, target, true);
+              viewer.viewport.panTo(target, true);
+            } else if (panIfZoomed) {
+              viewer.viewport.panTo(target, true);
             }
-            viewer.viewport.panTo(target, true);
           } catch (e) {
-            console.warn("[osd_viewer] navigate failed:", e);
+            console.warn("[osd_viewer] selectPatch failed:", e);
           }
         }
       }
@@ -443,8 +450,10 @@
       const panToSelected = args.pan_to_selected === true;
       if (externallySelected != null) {
         if (initialized && patchDivs.size > 0) {
-          if (panToSelected) navigateToSelected(externallySelected);
-          else markSelected(externallySelected);
+          // panIfZoomed se mapea a pan_to_selected: el botón siguiente
+          // y los cambios del number_input vienen con true (navegación
+          // explícita); el eco del click capturado viene con false.
+          selectPatch(externallySelected, panToSelected);
         } else {
           window.__pendingSelected = externallySelected;
         }
