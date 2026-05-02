@@ -91,6 +91,12 @@ class Job:
         return self.job_dir / "patch_eval.npz"
 
     @property
+    def features_path(self) -> Path:
+        """Path del .npy con features 512-d por parche (post-ReLU del head F4).
+        Persistido para abaratar futuros fine-tunes del head sin reforwardear F4."""
+        return self.job_dir / "features.npy"
+
+    @property
     def dzi_path(self) -> Path:
         """Path del fichero DZI principal (XML) generado por pyvips a partir
         del TIFF para el visor OpenSeadragon. Solo existe si input_type=tiff

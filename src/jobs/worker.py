@@ -194,6 +194,11 @@ def _do_inference(manager: JobManager, job: Job) -> None:
         if result.attention_weights_mean is not None:
             np.save(job.attention_path, result.attention_weights_mean.numpy())
 
+        # Persistir features 512-d para abaratar futuros fine-tunes del head
+        # (Fase 0 del flujo human-in-the-loop). ~2 KB por parche.
+        if result.features is not None:
+            np.save(job.features_path, result.features.numpy().astype(np.float32))
+
         # Predicciones patch-level del clasificador F4: SIEMPRE se guardan
         # (independientemente de la GT) para que la UI pueda mostrar la
         # distribución de clases predichas por parche aunque el H5 no traiga

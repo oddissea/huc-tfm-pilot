@@ -42,6 +42,9 @@ class SlideResult:
     attention_weights_mean: torch.Tensor | None  # (N,) atención promedio si se pidió
     patch_probs: torch.Tensor | None = None       # (N, 3) softmax del classifier F4 por parche
     patch_predictions: torch.Tensor | None = None # (N,) argmax de patch_probs (idx 0..2)
+    features: torch.Tensor | None = None          # (N, 512) embeddings post-ReLU del head F4
+                                                  # (input del AttnMIL). Persistidos por el worker
+                                                  # para abaratar futuros fine-tunes sin reforwardear F4.
 
 
 def _to_model_tensor(
@@ -195,6 +198,7 @@ def predict_slide(
         attention_weights_mean=attention_mean,
         patch_probs=patch_probs,
         patch_predictions=patch_preds,
+        features=features_512.detach().cpu(),
     )
 
 
