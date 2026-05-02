@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
+
+from src.corrections import (
+    CORRECTION_LABELS,
+    record_correction,
+    summarize_corrections,
+)
 
 if TYPE_CHECKING:
     from src.jobs.manager import Job
@@ -938,6 +945,155 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Panel de correcciones del patólogo (Fase 0 — captura)
+# ---------------------------------------------------------------------------
+
+def _patologo_id() -> str:
+    """ID del patólogo para auditoría de correcciones.
+
+    Pilot GCP: viene del env var PILOT_USER (configurable en docker-compose)
+    o, por defecto, 'anon'. En el HUC PC se establecerá a 'eduardo'.
+    """
+    return os.environ.get("PILOT_USER", "anon")
+
+
+def _model_version() -> str:
+    """Versión del bundle de modelos activo. Placeholder hasta que se
+    implemente production.json (Nivel 1 del flujo human-in-the-loop)."""
+    return os.environ.get("MODEL_VERSION", "head_v1+attnmil_v1")
+
+
+def _entropy_per_patch(probs: np.ndarray) -> np.ndarray:
+    """Entropía Shannon por parche (mayor → más incierto el modelo).
+    Útil como ordering del active learning para la corrección."""
+    eps = 1e-12
+    return -np.sum(probs * np.log(probs + eps), axis=1)
+
+
+def _render_corrections_panel(
+    job: "Job",
+    *,
+    pred_index: np.ndarray,
+    patch_probs: np.ndarray | None,
+    attention: np.ndarray,
+) -> None:
+    """Panel de captura de correcciones del patólogo.
+
+    Layout en expander (default colapsado para no saturar el detalle):
+      - selectbox del parche, ordenado por incertidumbre descendente
+      - segmented_control con las 6 etiquetas válidas
+      - text input para comentario opcional
+      - botón guardar
+      - resumen 'mis correcciones' con conteo por clase
+
+    Las correcciones se persisten append-only en `<job_dir>/corrections.jsonl`
+    vía `src.corrections.record_correction`. No tocan el modelo — sólo
+    construyen dataset para futuros fine-tunes (ver §8 de
+    `docs/deployment/MEJORA_CON_CORRECCIONES.md`).
+    """
+    n_patches = int(pred_index.shape[0])
+    if n_patches == 0:
+        return
+
+    st.divider()
+    with st.expander("✏️ Correcciones del patólogo (captura — no modifica el modelo)"):
+        st.caption(
+            "Las correcciones se guardan en `corrections.jsonl` por portaobjetos "
+            "y servirán como dataset patch-level para futuros reentrenamientos. "
+            "El modelo activo no cambia con cada corrección."
+        )
+
+        # Active learning: ordenar parches por incertidumbre descendente.
+        # Si no hay patch_probs (legado) caemos a orden natural.
+        if patch_probs is not None:
+            entropy = _entropy_per_patch(patch_probs)
+            order = np.argsort(-entropy)
+            confidences = patch_probs.max(axis=1)
+        else:
+            order = np.arange(n_patches)
+            confidences = np.full(n_patches, np.nan)
+
+        # Selectbox con opciones formateadas. Mostramos hasta 200 para
+        # no saturar el render — los más inciertos van primero.
+        max_options = min(200, n_patches)
+        labels = []
+        for i in order[:max_options]:
+            i_int = int(i)
+            pred_str = CLASS_NAMES[pred_index[i_int]]
+            conf = confidences[i_int]
+            conf_str = f"{conf:.0%}" if not np.isnan(conf) else "?"
+            att = attention[i_int] if i_int < len(attention) else 0.0
+            labels.append(f"#{i_int} · {pred_str} ({conf_str}) · α={att:.4f}")
+
+        sel_label = st.selectbox(
+            f"Parche a corregir (ordenados por incertidumbre · top {max_options} de {n_patches})",
+            options=labels,
+            key=f"corr_sel_{job.job_id}",
+        )
+        if sel_label is None:
+            return
+        sel_pos = labels.index(sel_label)
+        patch_idx = int(order[sel_pos])
+
+        # Selector de clase. segmented_control para que sea un click directo.
+        new_label = st.segmented_control(
+            "Etiqueta corregida",
+            options=list(CORRECTION_LABELS),
+            key=f"corr_label_{job.job_id}",
+        )
+
+        comment = st.text_input(
+            "Comentario (opcional)",
+            key=f"corr_comment_{job.job_id}",
+            placeholder="p. ej. 'morfología poco clara, posible artefacto de tinción'",
+        )
+
+        col_save, col_info = st.columns([1, 4])
+        with col_save:
+            if st.button(
+                "💾 Guardar corrección",
+                key=f"corr_save_{job.job_id}",
+                disabled=new_label is None,
+                type="primary",
+            ):
+                pred_orig_str = CLASS_NAMES[int(pred_index[patch_idx])]
+                probs_orig = (
+                    patch_probs[patch_idx].tolist()
+                    if patch_probs is not None
+                    else None
+                )
+                record_correction(
+                    job.job_dir,
+                    slide_uuid=job.job_id,
+                    patch_idx=patch_idx,
+                    label_corr=new_label,
+                    pred_orig=pred_orig_str,
+                    probs_orig=probs_orig,
+                    patologo_id=_patologo_id(),
+                    model_version=_model_version(),
+                    comment=comment or "",
+                )
+                st.success(f"Corrección guardada: parche #{patch_idx} → {new_label}")
+                st.rerun()
+        with col_info:
+            if new_label is None:
+                st.caption("Selecciona una etiqueta para activar el guardado.")
+
+        # Resumen de correcciones de este slide
+        summary = summarize_corrections(job.job_dir)
+        if summary["n_total"] > 0:
+            st.markdown("**Correcciones registradas para este portaobjetos:**")
+            cols = st.columns(2)
+            cols[0].metric("Total registradas", summary["n_total"])
+            cols[1].metric("Parches únicos", summary["n_unique_patches"])
+            if summary["by_label"]:
+                breakdown = " · ".join(
+                    f"**{c}**: {n}" for c, n in sorted(summary["by_label"].items())
+                )
+                st.caption(f"Por etiqueta: {breakdown}")
+
+
+# ---------------------------------------------------------------------------
 # Métricas acumuladas slide-level (M4.7b)
 # ---------------------------------------------------------------------------
 
@@ -1082,6 +1238,11 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     pred_index = (
         np.asarray(patch_eval["pred_index"], dtype=np.int64)
         if patch_eval is not None and "pred_index" in patch_eval
+        else None
+    )
+    pred_probs = (
+        np.asarray(patch_eval["pred_probs"], dtype=np.float32)
+        if patch_eval is not None and "pred_probs" in patch_eval
         else None
     )
 
@@ -1233,3 +1394,15 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         )
         if result.get("has_patch_gt"):
             _render_patch_validation(patch_eval, result)
+
+    # ─── Panel de correcciones del patólogo (Fase 0) ────────────────────────
+    # Siempre disponible en ambos modos (atención y predicciones), al final
+    # del detalle. Expander colapsado por defecto: el patólogo lo abre cuando
+    # quiere capturar correcciones.
+    if pred_index is not None:
+        _render_corrections_panel(
+            job,
+            pred_index=pred_index,
+            patch_probs=pred_probs,
+            attention=attention,
+        )
