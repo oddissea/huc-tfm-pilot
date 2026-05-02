@@ -1116,13 +1116,32 @@ def _render_corrections_panel(
             if new_label is None:
                 st.caption("Selecciona una etiqueta para activar el guardado.")
 
-        # Resumen de correcciones de este slide
+        # Resumen de correcciones de este slide.
+        # Dividimos entre ternarias (ADE/NOR/CAR) — que entrarán al fine-tune
+        # del head — y no-ternarias (HIP/ART/EXCLUDED) — persistidas como
+        # dataset latente para modelos futuros (cuaternario con HIP) o como
+        # filtro de calidad. Ver docs/deployment/MEJORA_CON_CORRECCIONES.md.
         summary = summarize_corrections(job.job_dir)
         if summary["n_total"] > 0:
+            ternary = sum(
+                summary["by_label"].get(c, 0) for c in ("ADE", "NOR", "CAR")
+            )
+            non_ternary = sum(
+                summary["by_label"].get(c, 0) for c in ("HIP", "ART", "EXCLUDED")
+            )
             st.markdown("**Correcciones registradas para este portaobjetos:**")
-            cols = st.columns(2)
-            cols[0].metric("Total registradas", summary["n_total"])
-            cols[1].metric("Parches únicos", summary["n_unique_patches"])
+            cols = st.columns(3)
+            cols[0].metric("Parches únicos", summary["n_unique_patches"])
+            cols[1].metric(
+                "Ternarias (ADE/NOR/CAR)", ternary,
+                help="Estas correcciones entrarán al fine-tune del head ternario.",
+            )
+            cols[2].metric(
+                "No ternarias (HIP/ART/EXCLUDED)", non_ternary,
+                help="Persistidas como dataset latente — útiles para modelos "
+                     "con más clases o como filtro de calidad. No entran al "
+                     "fine-tune ternario actual.",
+            )
             if summary["by_label"]:
                 breakdown = " · ".join(
                     f"**{c}**: {n}" for c, n in sorted(summary["by_label"].items())
