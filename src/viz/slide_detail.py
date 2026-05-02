@@ -1046,35 +1046,28 @@ def _render_corrections_panel(
             confidences = np.full(n_patches, np.nan)
 
         # Input numérico directo: el patólogo lee el #idx en el hover
-        # del visor y lo teclea aquí. Más rápido que un combo de N
-        # opciones ordenadas, especialmente cuando el N es grande.
-        # Default = el parche más incierto (active learning) la primera
-        # vez que se abre el panel, o el último editado en sucesivos
-        # reruns.
-        target_key = f"corr_target_{job.job_id}"
-        if target_key not in st.session_state:
-            st.session_state[target_key] = int(order[0]) if len(order) > 0 else 0
+        # del visor y lo teclea aquí. Una sola key (la del widget) es
+        # source-of-truth — render_slide_detail lee de ahí también, así
+        # el visor recoge el valor sin depender del orden de render.
+        widget_key = f"corr_idx_{job.job_id}"
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = int(order[0]) if len(order) > 0 else 0
 
-        # Label común fuera de la fila para que el number_input y el botón
-        # queden alineados horizontalmente (sin desfase vertical por el
-        # label propio del input).
         st.markdown(f"**Parche a corregir** (0–{n_patches - 1})")
         col_idx, col_next = st.columns([2, 1])
         with col_idx:
+            # Sin `value=` — la key controla a través de session_state.
+            # Streamlit incrementa automáticamente el session_state[key]
+            # cuando el user pulsa +/- o teclea, y el rerun recoge el
+            # nuevo valor consistentemente.
             patch_idx = int(st.number_input(
                 "Parche a corregir",
                 min_value=0, max_value=n_patches - 1, step=1,
-                value=int(st.session_state[target_key]),
-                key=f"corr_idx_{job.job_id}",
+                key=widget_key,
                 help="Teclea el #índice que ves en el hover del visor.",
                 label_visibility="collapsed",
             ))
-            st.session_state[target_key] = patch_idx
         with col_next:
-            # Saltar al siguiente parche en el ranking de incertidumbre.
-            # Si el patch_idx actual está en el ranking, avanzamos al
-            # siguiente (k+1). Si llegamos al final, volvemos al principio.
-            # Si no está en el ranking (caso raro), usamos el más incierto.
             order_list = [int(x) for x in order]
             if patch_idx in order_list:
                 cur_pos = order_list.index(patch_idx)
@@ -1087,7 +1080,10 @@ def _render_corrections_panel(
                 key=f"corr_next_{job.job_id}",
                 use_container_width=True,
             ):
-                st.session_state[target_key] = next_uncertain
+                # IMPORTANTE: actualizar la key del widget directamente
+                # para que en el siguiente rerun el number_input muestre
+                # el nuevo valor en lugar de retener el anterior.
+                st.session_state[widget_key] = next_uncertain
                 st.rerun()
 
         # Info del parche seleccionado: replica el contenido del hover
@@ -1365,12 +1361,13 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         # Si estamos en modo predicciones y ya se ha seleccionado un parche
         # en el panel de correcciones, le pasamos al visor `selected_idx`
         # para que dibuje el borde amarillo y centre la vista en él.
-        # En modo atención no destacamos nada.
+        # Leemos directamente del session_state del widget number_input
+        # — Streamlit ya lo ha actualizado al entrar a este rerun.
         sel_idx = None
         if show_pred:
-            target_key = f"corr_target_{job.job_id}"
-            if target_key in st.session_state:
-                sel_idx = int(st.session_state[target_key])
+            widget_key = f"corr_idx_{job.job_id}"
+            if widget_key in st.session_state:
+                sel_idx = int(st.session_state[widget_key])
         _render_openseadragon_viewer(
             job,
             positions=positions,
