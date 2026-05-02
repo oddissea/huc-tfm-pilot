@@ -470,6 +470,14 @@ def _render_openseadragon_viewer(
         return None
     dzi_url = f"/dzi/{job.job_id}/slide.dzi"
 
+    # Cargar correcciones existentes para mostrar marcador distintivo
+    # en el visor sobre los parches ya corregidos. Deduplicado last-wins
+    # por patch_idx — la última corrección registrada es la que cuenta.
+    from src.corrections import list_corrections
+    corrections_by_idx: dict[int, str] = {}
+    for c in list_corrections(job.job_dir):
+        corrections_by_idx[int(c.patch_idx)] = c.label_corr
+
     # Construye el JSON con posiciones + clase + atención de cada parche,
     # restando el offset del DZI stitched (las posiciones del H5 están en
     # coords del WSI completo; el DZI stitched empieza en (y_min, x_min)).
@@ -518,6 +526,8 @@ def _render_openseadragon_viewer(
                 pp = pred_probs_arr[i]
                 # Probs en orden CLASS_NAMES = (ADE, NOR, CAR)
                 item["probs"] = [round(float(v), 3) for v in pp]
+            if i in corrections_by_idx:
+                item["corrected"] = corrections_by_idx[i]
             items.append(item)
         overlays_json = json.dumps(items)
 
@@ -612,6 +622,26 @@ def _render_openseadragon_viewer(
             selectedOverlay = o;
           }}
 
+          // Marcador de "ya corregido": círculo coloreado en la esquina
+          // superior derecha del parche con el color de la clase
+          // corregida. Permite al patólogo ver de un vistazo qué parches
+          // ya ha tocado sin tener que revisar el JSONL.
+          // ADE=naranja, NOR=verde, CAR=azul, HIP/ART/EXCLUDED=gris.
+          if (o.corrected) {{
+            const corrColors = {{
+              "ADE": "#ff7f0e", "NOR": "#2ca02c", "CAR": "#1f77b4",
+              "HIP": "#888888", "ART": "#888888", "EXCLUDED": "#888888",
+            }};
+            const dotColor = corrColors[o.corrected] || "#888888";
+            const dot = document.createElementNS(SVG_NS, "circle");
+            dot.setAttribute("cx", "0.85"); dot.setAttribute("cy", "0.15");
+            dot.setAttribute("r", "0.10");
+            dot.setAttribute("fill", dotColor);
+            dot.setAttribute("stroke", "#fff");
+            dot.setAttribute("stroke-width", "0.025");
+            svg.appendChild(dot);
+          }}
+
           const div = document.createElement("div");
           div.className = "osd-patch";
           // Hint completo en multilínea — replicaba lo que mostraba el
@@ -630,6 +660,9 @@ def _render_openseadragon_viewer(
           if (o.att !== undefined) {{
             const pct = (o.att_rel * 100).toFixed(0);
             lines.push(`atención AttnMIL: ${{o.att.toFixed(4)}} (${{pct}}% del máximo)`);
+          }}
+          if (o.corrected) {{
+            lines.push(`✓ corregido como: ${{o.corrected}}`);
           }}
           lines.push(`posición: y=${{o.pos_y}}, x=${{o.pos_x}}`);
           div.title = lines.join("\\n");
