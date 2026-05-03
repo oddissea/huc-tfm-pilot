@@ -1061,11 +1061,11 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
         rows = []
         for name, m in metrics.items():
             rows.append({
-                "Clase (class)": name,
-                "Precisión (precision)": f"{m['precision']:.1%}",
+                "Clase": name,
+                "Precisión": f"{m['precision']:.1%}",
                 "Sensibilidad (recall)": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
-                "F1 (F1-score)": f"{m['f1']:.3f}",
-                "Soporte (support)": m["support"],
+                "F1-score": f"{m['f1']:.3f}",
+                "Soporte": m["support"],
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
@@ -1717,11 +1717,11 @@ def render_session_metrics(jobs: list) -> None:
         rows = []
         for name, m in metrics.items():
             rows.append({
-                "Clase (class)": name,
-                "Precisión (precision)": f"{m['precision']:.1%}",
+                "Clase": name,
+                "Precisión": f"{m['precision']:.1%}",
                 "Sensibilidad (recall)": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
-                "F1 (F1-score)": f"{m['f1']:.3f}",
-                "Soporte (support)": m["support"],
+                "F1-score": f"{m['f1']:.3f}",
+                "Soporte": m["support"],
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         if car_total:
