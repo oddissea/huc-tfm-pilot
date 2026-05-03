@@ -132,6 +132,41 @@ st.markdown(
         color: #261B17 !important;
         opacity: 0.85 !important;
     }
+
+    /* === File uploader: traducción de textos hardcoded en inglés ========
+       Streamlit no expone los strings "Drag and drop files here" ni
+       "Limit XXMB per file" en config. Los ocultamos con font-size:0 y
+       los reemplazamos por su versión en español con ::before. */
+    [data-testid="stFileUploaderDropzoneInstructions"] > div > span {
+        font-size: 0 !important;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child::before {
+        content: "Arrastra los archivos aquí";
+        font-size: 14px !important;
+        color: #261B17;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"] > div > small {
+        font-size: 0 !important;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"] > div > small::before {
+        content: "Límite 4 GB por archivo · TIF, TIFF, H5, HDF5";
+        font-size: 12px !important;
+        color: #261B17;
+        opacity: 0.75;
+    }
+    /* Botón "Browse files" -> "Buscar archivos" */
+    [data-testid="stBaseButton-secondary"] {
+        position: relative;
+    }
+    [data-testid="stFileUploaderDropzone"] button[kind="secondary"] span,
+    [data-testid="stFileUploaderDropzone"] button span {
+        font-size: 0 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button[kind="secondary"] span::before,
+    [data-testid="stFileUploaderDropzone"] button span::before {
+        content: "Buscar archivos";
+        font-size: 14px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
