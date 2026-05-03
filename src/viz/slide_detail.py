@@ -1122,7 +1122,7 @@ def _render_corrections_panel(
                 default="Entropía Shannon",
                 key=f"corr_ranking_mode_{job.job_id}",
                 help=(
-                    "**Entropía Shannon** (recomendado): mide la indecisión del "
+                    "**Entropía Shannon**: mide la indecisión del "
                     "modelo entre las 3 clases simultáneamente. Un parche con "
                     "probs [0.40, 0.35, 0.25] tiene entropía alta (las 3 compiten). "
                     "Uno con [0.50, 0.49, 0.01] tiene entropía baja aunque max sea "
