@@ -389,13 +389,6 @@
       const showAtt = args.show_attention === true;
       const showSelBorders = args.show_selected_borders !== false;  // default true
       viewCorrected = args.view_corrected === true;
-      const numCorrected = overlaysData.filter(o => o.corrected).length;
-      console.log("[osd_viewer] applyToggles", {
-        view_corrected: viewCorrected,
-        n_overlays: overlaysData.length,
-        n_corrected: numCorrected,
-        showPred, showAtt, showSelBorders,
-      });
 
       for (const o of overlaysData) {
         const isSelected = (selectedIdx != null && o.idx === selectedIdx);

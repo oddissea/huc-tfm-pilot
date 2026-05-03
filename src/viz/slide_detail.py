@@ -32,6 +32,7 @@ from src.corrections import (
     CORRECTION_LABELS,
     latest_slide_label_entry,
     list_corrections,
+    list_slide_label_history,
     record_correction,
     record_slide_label,
     summarize_corrections,
@@ -1183,12 +1184,55 @@ def _render_slide_label_panel(
                 st.session_state[edit_key] = True
                 st.rerun()
         with col_del:
-            with st.popover("🗑️ Borrar", use_container_width=True):
+            # Detectar si hay correcciones posteriores al upload — para
+            # ofrecer "deshacer correcciones (volver al upload)" además
+            # del borrado total. Simétrico con el patch-level: 'borrar
+            # correcciones' en parche elimina las anotaciones del
+            # patólogo; aquí, restaura la etiqueta del upload (que es
+            # GT clínica a priori, no respuesta a la predicción).
+            history = list_slide_label_history(job.job_dir)
+            upload_entry = next(
+                (e for e in history if e.action == "upload"), None,
+            )
+            has_corrections_post_upload = (
+                upload_entry is not None
+                and any(e is not upload_entry for e in history)
+            )
+
+            with st.popover("🗑️ Gestionar", use_container_width=True):
+                # Opción A: deshacer correcciones (solo si hay).
+                if has_corrections_post_upload:
+                    st.markdown(
+                        f"**Deshacer correcciones** — restaura la etiqueta "
+                        f"del upload (`{upload_entry.label_to}`) y elimina "
+                        f"todas las correcciones posteriores del historial."
+                    )
+                    if st.button(
+                        f"↩️ Volver a etiqueta del upload ({upload_entry.label_to})",
+                        key=f"slide_label_undo_btn_{job.job_id}",
+                        use_container_width=True,
+                    ):
+                        # Reescribir el JSONL dejando solo la entrada del
+                        # upload. Restaurar slide_gt al valor del upload.
+                        audit_path = job.job_dir / "slide_label_audit.jsonl"
+                        with open(audit_path, "w", encoding="utf-8") as f:
+                            f.write(upload_entry.to_jsonl() + "\n")
+                        get_manager().update_extra(
+                            job.job_id, slide_gt=upload_entry.label_to,
+                        )
+                        st.success(
+                            f"Correcciones deshechas — etiqueta restaurada a "
+                            f"**{upload_entry.label_to}** (upload)."
+                        )
+                        st.rerun()
+                    st.divider()
+
+                # Opción B: borrar todo (siempre disponible).
                 st.warning(
-                    "Esta acción borra la etiqueta clínica del portaobjetos "
-                    "y elimina `slide_label_audit.jsonl` (todo el histórico). "
-                    "**Es irreversible.** El slide volverá a estado *sin "
-                    "etiqueta* y dejará de contar para las métricas acumuladas."
+                    "**Borrar etiqueta y audit log:** elimina `slide_gt` "
+                    "y todo el histórico. **Irreversible.** El slide "
+                    "volverá a *sin etiqueta* y dejará de contar para "
+                    "las métricas acumuladas."
                 )
                 phrase = "borrar etiqueta clínica"
                 confirm = st.text_input(
@@ -1203,10 +1247,6 @@ def _render_slide_label_panel(
                     disabled=not match,
                     type="primary",
                 ):
-                    # Borrar el slide_gt del meta.json — update_extra
-                    # elimina la clave si valor=None. Luego eliminar el
-                    # audit log entero (histórico). El JSONL puede no
-                    # existir si nunca se asignó vía panel.
                     get_manager().update_extra(job.job_id, slide_gt=None)
                     audit_path = job.job_dir / "slide_label_audit.jsonl"
                     if audit_path.exists():

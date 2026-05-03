@@ -167,6 +167,29 @@ class JobManager:
                 shutil.copyfileobj(file_obj, f)
             self._write_meta(job)
 
+        # Si el upload trae slide_gt, registramos entrada inicial en el
+        # audit log con action='upload'. Eso permite distinguir "etiqueta
+        # del upload" (que el patólogo conoce a priori del informe clínico)
+        # de "asignación / cambio desde el panel" (post-inferencia, en
+        # respuesta a la predicción del modelo). El panel puede entonces
+        # ofrecer "deshacer correcciones" que mantenga el upload original.
+        if slide_gt is not None:
+            try:
+                from src.corrections.slide_label_audit import (
+                    ACTION_UPLOAD, record_slide_label,
+                )
+                record_slide_label(
+                    job.job_dir,
+                    slide_uuid=job.job_id,
+                    label_to=slide_gt,
+                    label_from=None,
+                    action=ACTION_UPLOAD,
+                    comment="etiqueta puesta al subir",
+                )
+            except Exception as e:
+                # Audit log es informativo, no bloqueante.
+                logger.warning("audit upload falló para %s: %s", job.short_id, e)
+
         logger.info(
             "Encolado job %s (%s, %.1f MB)",
             job.short_id, original_filename, job.raw_path.stat().st_size / 1e6,

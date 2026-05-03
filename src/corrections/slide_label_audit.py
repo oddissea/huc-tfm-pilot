@@ -38,8 +38,9 @@ logger = logging.getLogger(__name__)
 
 SLIDE_LABEL_AUDIT_FILENAME = "slide_label_audit.jsonl"
 
-ACTION_ASSIGNED = "asignada"
-ACTION_CHANGED = "cambiada"
+ACTION_UPLOAD = "upload"      # etiqueta del radio al subir el slide
+ACTION_ASSIGNED = "asignada"  # primera asignación desde el panel del detalle
+ACTION_CHANGED = "cambiada"   # cambio sobre una etiqueta previa
 
 _write_lock = threading.Lock()
 
@@ -74,10 +75,16 @@ def record_slide_label(
     pred_orig_probs: list[float] | None = None,
     patologo_id: str = "anon",
     comment: str = "",
+    action: str | None = None,
 ) -> SlideLabelEntry:
     """Registra asignación (label_from=None) o cambio (label_from=<previa>)
-    de la etiqueta slide-level."""
-    action = ACTION_ASSIGNED if label_from is None else ACTION_CHANGED
+    de la etiqueta slide-level. Por defecto action se infiere:
+    - asignada si label_from is None
+    - cambiada si label_from != None
+    Pasa action='upload' explícitamente si la entrada viene del radio del
+    upload (no del panel del detalle)."""
+    if action is None:
+        action = ACTION_ASSIGNED if label_from is None else ACTION_CHANGED
     entry = SlideLabelEntry(
         slide_uuid=slide_uuid,
         action=action,
