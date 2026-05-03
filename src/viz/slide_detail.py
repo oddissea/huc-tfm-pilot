@@ -1445,10 +1445,21 @@ def _render_corrections_panel(
         # ha pedido. El visor solo destaca y centra cuando hay valor.
         widget_key = f"corr_idx_{job.job_id}"
         pending_key = f"corr_pending_target_{job.job_id}"
+        pending_pan_key = f"corr_pending_pan_{job.job_id}"
         # NOTA: la aplicación pending_key → widget_key se hace en
         # render_slide_detail (antes del visor) para evitar
         # desincronización visor↔combo. Aquí solo escribimos en
         # pending_key desde el botón 'siguiente más incierto'.
+        # El tecleado en number_input usa on_change para señalizar que
+        # es navegación explícita y debe panear/zoomear el visor.
+
+        def _on_idx_typed() -> None:
+            # Cuando el patólogo teclea un #idx + Enter, el flujo es
+            # navegación explícita (igual que el botón siguiente): el
+            # visor debe centrar y zoomear ese parche, no solo
+            # marcarlo en amarillo silenciosamente fuera del viewport.
+            if st.session_state.get(widget_key) is not None:
+                st.session_state[pending_pan_key] = True
 
         # Set de parches ya corregidos — para excluirlos del cálculo del
         # 'siguiente más incierto'.
@@ -1464,6 +1475,7 @@ def _render_corrections_panel(
                 min_value=0, max_value=n_patches - 1, step=1,
                 value=None,  # arranca vacío (placeholder visible)
                 key=widget_key,
+                on_change=_on_idx_typed,
                 help="Teclea el #índice que ves en el hover del visor o pulsa 'Siguiente más incierto'.",
                 placeholder="—",
                 label_visibility="collapsed",
@@ -1930,6 +1942,12 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             # pero con pending_pan=False (ya estás mirando ahí, no panees).
             if pending_key in st.session_state:
                 st.session_state[widget_key] = st.session_state.pop(pending_key)
+                pan_to_selected_flag = bool(st.session_state.pop(pending_pan_key, False))
+            elif pending_pan_key in st.session_state:
+                # Tecleado directo en number_input: on_change marcó
+                # pending_pan_key=True. widget_key ya tiene el nuevo
+                # valor (Streamlit lo actualizó antes del callback);
+                # solo nos queda consumir el flag de pan/zoom.
                 pan_to_selected_flag = bool(st.session_state.pop(pending_pan_key, False))
             if widget_key in st.session_state:
                 v = st.session_state[widget_key]
