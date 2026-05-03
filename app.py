@@ -64,6 +64,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* st.info: azul → beige cálido */
     [data-testid="stAlertContentInfo"] {
         background-color: #F0E6D6 !important;
         color: #261B17 !important;
@@ -73,6 +74,27 @@ st.markdown(
     [data-testid="stAlertContentInfo"] [data-testid="stIcon"] {
         color: #7A5A3F !important;
         fill: #7A5A3F !important;
+    }
+    /* st.success: verde → beige con acento verde olivo (mantiene "todo OK" sin
+       romper la coherencia tonal). */
+    [data-testid="stAlertContentSuccess"] {
+        background-color: #E8DFC8 !important;
+        color: #261B17 !important;
+        border-left: 3px solid #5E7A4F !important;
+    }
+    [data-testid="stAlertContentSuccess"] svg,
+    [data-testid="stAlertContentSuccess"] [data-testid="stIcon"] {
+        color: #5E7A4F !important;
+        fill: #5E7A4F !important;
+    }
+    /* Inline code en markdown (`...`): verde Streamlit → marrón oscuro Oddissea.
+       NO afecta a bloques completos (st.code) que mantienen syntax highlight. */
+    [data-testid="stMarkdownContainer"] code:not(pre code) {
+        color: #261B17 !important;
+        background-color: rgba(122, 90, 63, 0.12) !important;
+        border: 1px solid rgba(122, 90, 63, 0.25);
+        padding: 0 0.25rem;
+        border-radius: 3px;
     }
     </style>
     """,
