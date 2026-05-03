@@ -1998,7 +1998,8 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         )
         # Leyenda visual compacta (una sola línea con iconos). Solo se
         # muestra en modo Predicciones; las X de error sólo aparecen si
-        # el slide trae GT por parche.
+        # el slide trae GT por parche. Usamos HTML inline para que las
+        # X coincidan en color con las que dibuja el SVG del visor.
         if show_pred:
             legend_parts = [
                 "🟢 NOR",
@@ -2008,10 +2009,23 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             ]
             if result.get("has_patch_gt"):
                 legend_parts.extend([
-                    "❌ error ternario",
-                    "🔴 HIP/ART (fuera de tarea)",
+                    (
+                        "<span style='color:#2ca02c;font-weight:700'>✕</span>"
+                        "<span style='color:#ff7f0e;font-weight:700'>✕</span>"
+                        "<span style='color:#1f77b4;font-weight:700'>✕</span>"
+                        " error ternario (color = GT real)"
+                    ),
+                    (
+                        "<span style='color:rgb(214,39,40);font-weight:700'>✕</span>"
+                        " HIP/ART (fuera de la tarea ternaria)"
+                    ),
                 ])
-            st.caption(" · ".join(legend_parts))
+            st.markdown(
+                "<div style='font-size:0.875rem;opacity:0.85;'>"
+                + " · ".join(legend_parts)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
     elif dzi_status == "generating":
         # El thread async de DZI todavía está corriendo. La cola fragment
         # rerunna cada 2 s y dispara rerun global cuando has_dzi cambia,
