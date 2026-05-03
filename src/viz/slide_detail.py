@@ -1061,11 +1061,11 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
         rows = []
         for name, m in metrics.items():
             rows.append({
-                "Clase": name,
-                "Precisión": f"{m['precision']:.1%}",
-                "Sensibilidad": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
-                "F1": f"{m['f1']:.3f}",
-                "Soporte": m["support"],
+                "Clase (class)": name,
+                "Precisión (precision)": f"{m['precision']:.1%}",
+                "Sensibilidad (recall)": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
+                "F1 (F1-score)": f"{m['f1']:.3f}",
+                "Soporte (support)": m["support"],
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
@@ -1073,6 +1073,30 @@ def _render_patch_validation(patch_eval: dict, result: dict) -> None:
         if breakdown:
             counts = ", ".join(f"{k}={v}" for k, v in breakdown.items())
             st.caption(f"Parches excluidos por categoría: {counts}")
+
+        # Cajita explicativa de las métricas, siempre visible (estilo
+        # del aviso de confianza del modo Atención). Define cada métrica
+        # con su fórmula y el dual nombre español/inglés.
+        st.info(
+            "**Métricas por clase** (definidas sobre la matriz de confusión 3×3 a "
+            "nivel de parche, normalizada por columna en el heatmap):\n\n"
+            "- **Precisión** (*precision*) = TP / (TP + FP) — De los parches "
+            "que el modelo predijo como esta clase, ¿qué fracción era realmente "
+            "esta clase? Mide cuán fiables son las predicciones positivas.\n"
+            "- **Sensibilidad** (*recall*, también *true positive rate*) = "
+            "TP / (TP + FN) — De los parches realmente de esta clase, ¿qué "
+            "fracción captó el modelo? Mide cuántos *positivos reales* no se "
+            "escapan.\n"
+            "- **F1** (*F1-score*) = 2·precisión·recall / (precisión + recall) — "
+            "Media armónica de precisión y recall. Penaliza cuando una de las "
+            "dos es muy baja (típico de clases minoritarias).\n"
+            "- **Soporte** (*support*) — Número de parches reales de esta clase "
+            "(el denominador de la sensibilidad: TP + FN).\n\n"
+            "Donde *TP* = true positives (clasificados correctamente), "
+            "*FP* = false positives (otra clase que el modelo predijo como "
+            "esta), *FN* = false negatives (esta clase real que el modelo "
+            "predijo como otra)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1693,11 +1717,11 @@ def render_session_metrics(jobs: list) -> None:
         rows = []
         for name, m in metrics.items():
             rows.append({
-                "Clase": name,
-                "Precisión": f"{m['precision']:.1%}",
-                "Sensibilidad": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
-                "F1": f"{m['f1']:.3f}",
-                "Soporte": m["support"],
+                "Clase (class)": name,
+                "Precisión (precision)": f"{m['precision']:.1%}",
+                "Sensibilidad (recall)": f"{m['recall']:.1%} ({m['tp']}/{m['support']})",
+                "F1 (F1-score)": f"{m['f1']:.3f}",
+                "Soporte (support)": m["support"],
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         if car_total:
@@ -1705,6 +1729,21 @@ def render_session_metrics(jobs: list) -> None:
                 f"CAR→ADE: {car_to_ade_rate:.1%} ({car_to_ade}/{car_total}) · "
                 f"CAR→NOR: {car_to_nor_rate:.1%} ({car_to_nor}/{car_total})"
             )
+
+    # Cajita explicativa común para ambas tablas (slide y parche), idéntica
+    # al texto bajo la matriz patch-level — útil aquí para el patólogo
+    # que llega directamente a las métricas acumuladas sin pasar por
+    # la matriz patch-level de un slide concreto.
+    st.info(
+        "**Métricas por clase** (definidas sobre la matriz de confusión 3×3 a "
+        "nivel de portaobjetos, normalizada por columna en el heatmap):\n\n"
+        "- **Precisión** (*precision*) = TP / (TP + FP) — De los slides que el "
+        "modelo predijo como esta clase, ¿qué fracción era realmente esta clase?\n"
+        "- **Sensibilidad** (*recall*) = TP / (TP + FN) — De los slides realmente "
+        "de esta clase, ¿qué fracción captó el modelo?\n"
+        "- **F1** (*F1-score*) = media armónica de precisión y recall.\n"
+        "- **Soporte** (*support*) — Número de slides reales de esta clase."
+    )
 
     with st.expander("Detalle por portaobjetos"):
         detail_rows = [
