@@ -37,6 +37,8 @@ services:
       # contiene los tiles DZI generados por el worker para el visor
       # OpenSeadragon. nginx los sirve como static (location /dzi/).
       - ./queue:/var/www/dzi:ro
+      # Landing estático servido en oddissea.com / www.oddissea.com.
+      - ./landing:/usr/share/nginx/landing:ro
     depends_on:
       - app
     restart: unless-stopped

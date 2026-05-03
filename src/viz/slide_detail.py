@@ -830,7 +830,7 @@ def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
         zmin=0, zmax=1,
         text=text,
         texttemplate="%{text}",
-        textfont=dict(size=17),
+        textfont=dict(size=15),
         hovertemplate="real=%{y} · predicho=%{x}<br>%{text}<extra></extra>",
         showscale=False,
     ))
