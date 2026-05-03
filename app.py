@@ -135,7 +135,12 @@ st.markdown(
 
     /* === Métricas (st.metric) centradas bajo su título ================== */
     body [data-testid="stMetric"] {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
         text-align: center !important;
+        width: 100% !important;
     }
     body [data-testid="stMetric"] * {
         text-align: center !important;
@@ -143,8 +148,8 @@ st.markdown(
     body [data-testid="stMetricLabel"],
     body [data-testid="stMetricValue"],
     body [data-testid="stMetricDelta"] {
+        width: 100% !important;
         justify-content: center !important;
-        align-items: center !important;
     }
 
     /* === File uploader: traducción de textos hardcoded en inglés ========
