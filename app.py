@@ -67,18 +67,28 @@ st.markdown(
     /* === Alerts (st.info / st.success / st.warning / st.error) ============
        Streamlit cambia los data-testid entre versiones. Cubrimos todas las
        variantes posibles con selectores universales. La specificity se
-       refuerza con `body` para ganar a los estilos inline de emotion. */
+       refuerza con `body` para ganar a los estilos inline de emotion.
+
+       Aplicamos el fondo SOLO al wrapper más exterior. Los hijos quedan
+       transparentes para evitar el doble borde / fondo apilado. */
     body [data-testid="stAlert"],
-    body [data-testid^="stAlertContent"],
     body [data-testid="stNotification"],
-    body [data-baseweb="notification"],
     body div[role="alert"],
     body .stAlert {
         background-color: #F0E6D6 !important;
         color: #261B17 !important;
-        border-left: 3px solid #7A5A3F !important;
+        border: none !important;
         border-radius: 6px !important;
     }
+    /* Hijos: sin fondo propio (Streamlit los pinta verde/azul/etc.) */
+    body [data-testid="stAlert"] > div,
+    body [data-testid="stAlert"] [data-testid^="stAlertContent"],
+    body [data-baseweb="notification"],
+    body [data-baseweb="notification"] > div {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    /* Texto interno marrón oscuro */
     body [data-testid="stAlert"] p,
     body [data-testid="stAlert"] span,
     body [data-testid="stAlert"] div,
@@ -88,6 +98,7 @@ st.markdown(
     body div[role="alert"] span {
         color: #261B17 !important;
     }
+    /* Iconos: marrón medio */
     body [data-testid="stAlert"] svg,
     body [data-baseweb="notification"] svg,
     body div[role="alert"] svg {
