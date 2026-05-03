@@ -48,7 +48,12 @@ def _detect_gt_from_filename(filename: str) -> str | None:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-st.set_page_config(page_title="HUC TFM Pilot", page_icon="🩺", layout="wide")
+st.set_page_config(
+    page_title="HUC TFM Pilot",
+    page_icon="assets/oddissea.png",
+    layout="wide",
+)
+st.logo("assets/oddissea.png", size="large")
 
 st.title("🩺 HUC TFM Pilot")
 st.caption(

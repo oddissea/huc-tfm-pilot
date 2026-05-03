@@ -24,6 +24,9 @@ COPY src/ ./src/
 # Streamlit config (upload limits, telemetría).
 COPY .streamlit/ ./.streamlit/
 
+# Assets (logo, etc.).
+COPY assets/ ./assets/
+
 # App entry point.
 COPY app.py .
 
