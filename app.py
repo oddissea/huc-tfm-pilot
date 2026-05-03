@@ -176,8 +176,8 @@ st.title("🩺 HUC TFM Pilot")
 st.markdown(
     "<p style='font-style: italic; color: #261B17; opacity: 0.85; "
     "margin-top: -0.5rem; margin-bottom: 0.3rem; font-size: 1.05rem;'>"
-    "Mejora de la detección del cáncer colorrectal con aprendizaje "
-    "contrastivo e imágenes histológicas escasamente anotadas"
+    "Mejora de la detección del cáncer colorrectal mediante aprendizaje "
+    "contrastivo supervisado con un conjunto limitado de imágenes etiquetadas"
     "</p>",
     unsafe_allow_html=True,
 )
