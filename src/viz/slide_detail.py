@@ -1111,11 +1111,36 @@ def _render_corrections_panel(
             "El modelo activo no cambia con cada corrección."
         )
 
-        # Active learning: ordenar parches por incertidumbre descendente.
-        # Si no hay patch_probs (legado) caemos a orden natural.
+        # Selector de métrica de incertidumbre. El patólogo elige entre
+        # entropía Shannon (más fiel teóricamente, captura indecisión
+        # entre las 3 clases) y 1-max(probs) (más intuitivo, "menor
+        # max = más incierto"). Default: entropía.
         if patch_probs is not None:
-            entropy = _entropy_per_patch(patch_probs)
-            order = np.argsort(-entropy)
+            ranking_mode = st.segmented_control(
+                "Métrica de incertidumbre para el ranking",
+                options=["Entropía Shannon", "Probabilidad máxima"],
+                default="Entropía Shannon",
+                key=f"corr_ranking_mode_{job.job_id}",
+                help=(
+                    "**Entropía Shannon** (recomendado): mide la indecisión del "
+                    "modelo entre las 3 clases simultáneamente. Un parche con "
+                    "probs [0.40, 0.35, 0.25] tiene entropía alta (las 3 compiten). "
+                    "Uno con [0.50, 0.49, 0.01] tiene entropía baja aunque max sea "
+                    "similar (en realidad solo 2 clases compiten).\n\n"
+                    "**Probabilidad máxima**: ordena por `max(probs)` ascendente "
+                    "(menor max = más incierto). Más intuitivo, ignora qué hacen "
+                    "las clases secundarias. Útil cuando una clase ya está casi "
+                    "descartada y solo importa la confianza de la dominante."
+                ),
+            )
+            if ranking_mode == "Probabilidad máxima":
+                # max ascendente: parches con menor max van primero.
+                max_probs = patch_probs.max(axis=1)
+                order = np.argsort(max_probs)
+            else:
+                # entropía descendente: parches con mayor entropía primero.
+                entropy = _entropy_per_patch(patch_probs)
+                order = np.argsort(-entropy)
             confidences = patch_probs.max(axis=1)
         else:
             order = np.arange(n_patches)
