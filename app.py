@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from datetime import datetime
 
 import pandas as pd
@@ -48,12 +49,14 @@ def _detect_gt_from_filename(filename: str) -> str | None:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+_LOGO_PATH = str(Path(__file__).parent / "assets" / "oddissea.png")
+
 st.set_page_config(
     page_title="HUC TFM Pilot",
-    page_icon="assets/oddissea.png",
+    page_icon=_LOGO_PATH,
     layout="wide",
 )
-st.logo("assets/oddissea.png", size="large")
+st.logo(_LOGO_PATH, size="large")
 
 st.title("🩺 HUC TFM Pilot")
 st.caption(
