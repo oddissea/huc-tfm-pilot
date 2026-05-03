@@ -830,6 +830,7 @@ def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
         zmin=0, zmax=1,
         text=text,
         texttemplate="%{text}",
+        textfont=dict(size=20),
         hovertemplate="real=%{y} · predicho=%{x}<br>%{text}<extra></extra>",
         showscale=False,
     ))
@@ -838,16 +839,23 @@ def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
             text=f"Matriz de confusión a nivel de {level} (filas: real, columnas: predicho)",
             x=0.5,
             xanchor="center",
+            font=dict(size=15),
         ),
-        xaxis=dict(title="Predicho", side="bottom", constrain="domain"),
+        xaxis=dict(
+            title=dict(text="Predicho", font=dict(size=14)),
+            side="bottom",
+            constrain="domain",
+            tickfont=dict(size=14),
+        ),
         yaxis=dict(
-            title="Real",
+            title=dict(text="Real", font=dict(size=14)),
             autorange="reversed",
             scaleanchor="x",
             scaleratio=1,
+            tickfont=dict(size=14),
         ),
-        height=380,
-        margin=dict(l=10, r=10, t=60, b=20),
+        height=460,
+        margin=dict(l=10, r=10, t=70, b=20),
     )
     return fig
 
