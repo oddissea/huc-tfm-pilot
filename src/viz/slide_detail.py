@@ -1996,22 +1996,22 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "parche para ver `#índice · clase · atención`. Las áreas blancas "
             "son zonas que el filtro de tejido descartó al parchear."
         )
-        # Leyenda visual de las marcas que pueden aparecer sobre los
-        # parches. Solo se muestra en modo Predicciones (donde están
-        # los bordes y posibles correcciones); las X de error solo
-        # aparecen si el slide trae GT por parche.
+        # Leyenda visual compacta (una sola línea con iconos). Solo se
+        # muestra en modo Predicciones; las X de error sólo aparecen si
+        # el slide trae GT por parche.
         if show_pred:
-            legend_lines = [
-                "**Leyenda:**",
-                "- 🟦🟧🟩 borde del parche · color = predicción del modelo (clase F4)",
-                "- ⭕ esquina superior derecha · parche corregido por ti (color = etiqueta corregida)",
+            legend_parts = [
+                "🟢 NOR",
+                "🟠 ADE",
+                "🔵 CAR",
+                "⭕ corregido",
             ]
             if result.get("has_patch_gt"):
-                legend_lines.extend([
-                    "- ❌ esquina inferior izquierda en color · error del modelo (color = clase real GT, dentro de la tarea ternaria)",
-                    "- ❌ esquina inferior izquierda en rojo · GT real es HIP o ART (fuera de la tarea ternaria — el modelo no tiene esa clase como salida)",
+                legend_parts.extend([
+                    "❌ error ternario",
+                    "🔴 HIP/ART (fuera de tarea)",
                 ])
-            st.caption("\n".join(legend_lines))
+            st.caption(" · ".join(legend_parts))
     elif dzi_status == "generating":
         # El thread async de DZI todavía está corriendo. La cola fragment
         # rerunna cada 2 s y dispara rerun global cuando has_dzi cambia,
@@ -2039,17 +2039,15 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "métricas y mapas se muestran de todos modos."
         )
 
-    # ─── Etiqueta clínica del slide (visible en ambos modos) ────────────────
-    # Permite al patólogo asignar la GT slide-level desde el detalle, no
-    # solo desde el radio del upload o el tab 'Editar GT' de la cola.
-    # Útil cuando se sube un slide sin etiqueta y se decide tras ver la
-    # predicción del modelo. Pasamos pred_class + probs para que el panel
-    # registre la predicción original en el audit log y muestre si la
-    # etiqueta clínica coincide con el modelo o lo corrige.
-    _render_slide_label_panel(job, pred_class=pred_class, pred_probs=probs)
-
-    # ─── Vista 'Atención': top-K + métricas slide-level + barras + aviso ────
+    # ─── Vista 'Atención': etiqueta clínica + top-K + métricas + barras ────
     if show_att:
+        # Etiqueta clínica del slide: solo visible en modo Atención
+        # (lectura global del slide, donde la decisión clínica
+        # cuadra naturalmente con el flujo del patólogo). En modo
+        # Predicciones se omite para no competir con las correcciones
+        # parche a parche.
+        _render_slide_label_panel(job, pred_class=pred_class, pred_probs=probs)
+
         # Top-K justo debajo del visor: extensión espacial inmediata de los
         # parches con mayor atención que se ven destacados arriba.
         st.markdown(f"**Top {top_k} parches por atención del AttnMIL**")
