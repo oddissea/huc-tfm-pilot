@@ -56,7 +56,6 @@ st.set_page_config(
     page_icon=_LOGO_PATH,
     layout="wide",
 )
-st.logo(_LOGO_PATH, size="large")
 
 st.title("🩺 HUC TFM Pilot")
 st.caption(
@@ -74,6 +73,9 @@ manager = get_manager()
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
+    _logo_col = st.columns([1, 2, 1])[1]
+    _logo_col.image(_LOGO_PATH, use_container_width=True)
+    st.divider()
     st.header("Estado del sistema")
     cuda_ok = torch.cuda.is_available()
     if cuda_ok:
