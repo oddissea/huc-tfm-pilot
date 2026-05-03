@@ -64,37 +64,71 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* === Alerts (st.info / st.success) → paleta Oddissea ====================
+       Streamlit no expone colores de callout en config.toml. Usamos varios
+       selectores en paralelo (data-testid + data-baseweb) para cubrir las
+       variaciones internas entre minor releases. */
+
     /* st.info: azul → beige cálido */
-    [data-testid="stAlertContentInfo"] {
+    [data-testid="stAlertContentInfo"],
+    [data-baseweb="notification"][kind="info"],
+    div[role="alert"]:has(svg[aria-label="info"]) {
         background-color: #F0E6D6 !important;
         color: #261B17 !important;
         border-left: 3px solid #7A5A3F !important;
     }
     [data-testid="stAlertContentInfo"] svg,
-    [data-testid="stAlertContentInfo"] [data-testid="stIcon"] {
+    [data-baseweb="notification"][kind="info"] svg {
         color: #7A5A3F !important;
         fill: #7A5A3F !important;
     }
-    /* st.success: verde → beige con acento verde olivo (mantiene "todo OK" sin
-       romper la coherencia tonal). */
-    [data-testid="stAlertContentSuccess"] {
+
+    /* st.success: verde → beige con acento verde olivo */
+    [data-testid="stAlertContentSuccess"],
+    [data-testid="stNotificationContentSuccess"],
+    [data-baseweb="notification"][kind="positive"],
+    div[role="alert"]:has(svg[aria-label="check_circle"]) {
         background-color: #E8DFC8 !important;
         color: #261B17 !important;
         border-left: 3px solid #5E7A4F !important;
     }
     [data-testid="stAlertContentSuccess"] svg,
-    [data-testid="stAlertContentSuccess"] [data-testid="stIcon"] {
+    [data-baseweb="notification"][kind="positive"] svg {
         color: #5E7A4F !important;
         fill: #5E7A4F !important;
     }
-    /* Inline code en markdown (`...`): verde Streamlit → marrón oscuro Oddissea.
-       NO afecta a bloques completos (st.code) que mantienen syntax highlight. */
-    [data-testid="stMarkdownContainer"] code:not(pre code) {
+    /* Cualquier alert con la palabra "GPU" o similar: respaldo por color de
+       fondo (Streamlit aplica un verde claro en st.success que machaca el
+       gradiente nuestro si el selector específico no aplica). */
+    [data-testid="stAlertContainer"] {
+        background-color: #E8DFC8 !important;
+        color: #261B17 !important;
+    }
+
+    /* === Inline code en markdown (verde Streamlit → marrón Oddissea) ==== */
+    [data-testid="stMarkdownContainer"] code {
         color: #261B17 !important;
         background-color: rgba(122, 90, 63, 0.12) !important;
         border: 1px solid rgba(122, 90, 63, 0.25);
         padding: 0 0.25rem;
         border-radius: 3px;
+    }
+    /* Restaurar code dentro de bloques pre (st.code mantiene syntax highlight) */
+    [data-testid="stMarkdownContainer"] pre code,
+    [data-testid="stCodeBlock"] code {
+        background-color: transparent !important;
+        border: none !important;
+        padding: 0 !important;
+        color: inherit !important;
+    }
+
+    /* === Captions (st.caption) — gris claro → marrón legible ============ */
+    [data-testid="stCaption"],
+    [data-testid="stCaptionContainer"],
+    .stCaption,
+    [data-testid="stMarkdownContainer"] small {
+        color: #261B17 !important;
+        opacity: 0.85;
     }
     </style>
     """,

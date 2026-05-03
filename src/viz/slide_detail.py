@@ -798,9 +798,25 @@ def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
     col_sums = cm.sum(axis=0, keepdims=True)
     cm_norm = np.where(col_sums > 0, cm / np.maximum(col_sums, 1), 0.0)
 
+    # Colorscale Oddissea: degradado del crema del logo al marrón oscuro.
+    # Conserva la lectura clásica de matrices de confusión (más oscuro =
+    # más concentración) en la paleta del proyecto.
+    _ODDISSEA_SCALE = [
+        [0.0, "#FBF7F0"],
+        [0.25, "#E5D6BE"],
+        [0.5, "#A8845E"],
+        [0.75, "#7A5A3F"],
+        [1.0, "#261B17"],
+    ]
+    # Texto adaptativo: claro sobre celdas oscuras, oscuro sobre claras
+    # (umbral 0.55 para que el cambio caiga dentro del marrón medio).
     text = [
         [
-            f"<b>{cm[i, j]}</b><br>({cm_norm[i, j]:.1%})"
+            (
+                f'<span style="color:'
+                f'{"#FBF7F0" if cm_norm[i, j] >= 0.55 else "#261B17"}">'
+                f"<b>{cm[i, j]}</b><br>({cm_norm[i, j]:.1%})</span>"
+            )
             for j in range(cm.shape[1])
         ]
         for i in range(cm.shape[0])
@@ -810,7 +826,7 @@ def _confusion_heatmap(cm: np.ndarray, level: str = "parche") -> go.Figure:
         z=cm_norm,
         x=list(CLASS_NAMES),
         y=list(CLASS_NAMES),
-        colorscale="Blues",
+        colorscale=_ODDISSEA_SCALE,
         zmin=0, zmax=1,
         text=text,
         texttemplate="%{text}",
