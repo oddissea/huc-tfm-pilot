@@ -134,19 +134,31 @@ st.markdown(
     }
 
     /* === Métricas (st.metric) centradas bajo su título ==================
-       Streamlit 1.40 no expone data-testid="stMetric"; usa clases de
-       Emotion. El "componentId" para Metric es e1i5pmia (estable dentro
-       de la versión). Targetamos ese y aplicamos centrado en cascada. */
-    body [class*="e1i5pmia"] {
-        text-align: center !important;
+       En Streamlit 1.40 el wrapper st.metric no expone data-testid;
+       solo los hijos (stMetricLabel/stMetricValue/stMetricDelta).
+       Localizamos el wrapper con :has() y forzamos flex column +
+       align-items center sobre el contenedor. */
+    body div:has(> [data-testid="stMetricLabel"]) {
+        display: flex !important;
+        flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
+        text-align: center !important;
+        width: 100% !important;
     }
-    body [data-testid="stMetric"],
-    body [data-testid^="stMetric"] {
+    body [data-testid="stMetricLabel"],
+    body [data-testid="stMetricValue"],
+    body [data-testid="stMetricDelta"] {
         text-align: center !important;
-        align-items: center !important;
         justify-content: center !important;
+        width: 100% !important;
+    }
+    body [data-testid="stMetricLabel"] > *,
+    body [data-testid="stMetricValue"] > *,
+    body [data-testid="stMetricDelta"] > * {
+        text-align: center !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
     }
 
     /* === File uploader: traducción de textos hardcoded en inglés ========
