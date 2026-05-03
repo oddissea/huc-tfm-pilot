@@ -1730,20 +1730,10 @@ def render_session_metrics(jobs: list) -> None:
                 f"CAR→NOR: {car_to_nor_rate:.1%} ({car_to_nor}/{car_total})"
             )
 
-    # Cajita explicativa común para ambas tablas (slide y parche), idéntica
-    # al texto bajo la matriz patch-level — útil aquí para el patólogo
-    # que llega directamente a las métricas acumuladas sin pasar por
-    # la matriz patch-level de un slide concreto.
-    st.info(
-        "**Métricas por clase** (definidas sobre la matriz de confusión 3×3 a "
-        "nivel de portaobjetos, normalizada por columna en el heatmap):\n\n"
-        "- **Precisión** (*precision*) = TP / (TP + FP) — De los slides que el "
-        "modelo predijo como esta clase, ¿qué fracción era realmente esta clase?\n"
-        "- **Sensibilidad** (*recall*) = TP / (TP + FN) — De los slides realmente "
-        "de esta clase, ¿qué fracción captó el modelo?\n"
-        "- **F1** (*F1-score*) = media armónica de precisión y recall.\n"
-        "- **Soporte** (*support*) — Número de slides reales de esta clase."
-    )
+    # No repetimos la cajita explicativa de las métricas — ya aparece
+    # bajo la tabla patch-level en _render_patch_validation. Las
+    # definiciones (precisión, sensibilidad, F1, soporte, TP/FP/FN) son
+    # las mismas independientemente del nivel.
 
     with st.expander("Detalle por portaobjetos"):
         detail_rows = [
