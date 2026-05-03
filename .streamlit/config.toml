@@ -6,3 +6,15 @@ maxMessageSize = 4096       # MB (websocket inbound, debe ser >= maxUploadSize)
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+# Paleta derivada del logo Oddissea (crema #E5D6BE sobre marrón #261B17).
+# Mantenemos fondo claro para no fatigar al revisar histología H&E,
+# pero los acentos (botones pulsados, checkboxes, sliders, links) usan
+# tonos cálidos del logo para coherencia de branding.
+base = "light"
+primaryColor = "#7A5A3F"             # marrón medio (acentos: botones, checkbox, slider)
+backgroundColor = "#FBF7F0"          # blanco crema muy sutil
+secondaryBackgroundColor = "#F0E6D6" # beige claro (sidebar, widgets, code blocks)
+textColor = "#261B17"                # marrón oscuro del logo
+font = "sans serif"
