@@ -1064,7 +1064,7 @@ def _patologo_id() -> str:
     Pilot GCP: viene del env var PILOT_USER (configurable en docker-compose)
     o, por defecto, 'anon'. En el HUC PC se establecerá a 'eduardo'.
     """
-    return os.environ.get("PILOT_USER", "anon")
+    return os.environ.get("PILOT_USER", "Patólogo")
 
 
 def _model_version() -> str:
@@ -1150,7 +1150,11 @@ def _render_slide_label_panel(
                     f"(modelo: **{pred_class}**, patólogo: **{current_gt}**)"
                 )
         if last_audit is not None:
+            # Registros antiguos guardaban "anon" como default; los
+            # mostramos como "Patólogo" en captions sin tocar el JSONL.
             patologo = last_audit.patologo_id or "?"
+            if patologo == "anon":
+                patologo = "Patólogo"
             ts = last_audit.ts.replace("T", " ").replace("Z", " UTC")
             if last_audit.action == "cambiada" and last_audit.label_from:
                 bits.append(
