@@ -1078,6 +1078,85 @@ def _entropy_per_patch(probs: np.ndarray) -> np.ndarray:
     return -np.sum(probs * np.log(probs + eps), axis=1)
 
 
+def _render_slide_label_panel(job: "Job") -> None:
+    """Panel para asignar/cambiar la etiqueta clínica slide-level.
+
+    Estados:
+    - **Sin etiqueta** (`slide_gt` no en {ADE, NOR, CAR}): aviso + selector
+      para asignarla. Sin etiqueta el slide no entra en las 'Métricas
+      acumuladas (slide-level)'.
+    - **Con etiqueta**: muestra la actual con su color. Botón 'Cambiar'
+      abre el selector para corregirla.
+
+    Persiste en `job.extra['slide_gt']` vía manager.update_extra. Mismo
+    campo que el radio del upload, así que las métricas acumuladas la
+    recogen automáticamente sin más cambios.
+    """
+    from src.jobs.manager import get_manager  # import local para evitar ciclo
+
+    current_gt = job.extra.get("slide_gt")
+    has_label = current_gt in CLASS_NAMES
+    edit_key = f"slide_label_edit_{job.job_id}"
+    is_editing = bool(st.session_state.get(edit_key, False)) or not has_label
+
+    st.divider()
+    if not has_label:
+        st.warning(
+            "🏷️ **Etiqueta clínica del portaobjetos:** sin asignar — "
+            "el slide no entrará en las *Métricas acumuladas (slide-level)* "
+            "hasta que le pongas una etiqueta."
+        )
+    elif not is_editing:
+        color = CLASS_COLORS.get(current_gt, "#888")
+        col_lbl, col_btn = st.columns([4, 1])
+        with col_lbl:
+            st.markdown(
+                f"🏷️ **Etiqueta clínica:** "
+                f"<span style='color:{color};font-weight:600;font-size:1.1em;'>"
+                f"{current_gt}</span>",
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            if st.button(
+                "✏️ Cambiar",
+                key=f"slide_label_change_btn_{job.job_id}",
+                use_container_width=True,
+            ):
+                st.session_state[edit_key] = True
+                st.rerun()
+        return
+
+    # Modo edición — selector + guardar (+ cancelar si ya había etiqueta).
+    new_label = st.segmented_control(
+        "Etiqueta clínica del portaobjetos",
+        options=list(CLASS_NAMES),
+        default=current_gt if has_label else None,
+        key=f"slide_label_input_{job.job_id}",
+    )
+    cols = st.columns([1, 1, 4])
+    with cols[0]:
+        if st.button(
+            "💾 Guardar",
+            key=f"slide_label_save_{job.job_id}",
+            disabled=new_label is None,
+            type="primary",
+            use_container_width=True,
+        ):
+            get_manager().update_extra(job.job_id, slide_gt=new_label)
+            st.session_state[edit_key] = False
+            st.success(f"Etiqueta clínica guardada: **{new_label}**")
+            st.rerun()
+    if has_label:
+        with cols[1]:
+            if st.button(
+                "❌ Cancelar",
+                key=f"slide_label_cancel_{job.job_id}",
+                use_container_width=True,
+            ):
+                st.session_state[edit_key] = False
+                st.rerun()
+
+
 def _render_corrections_panel(
     job: "Job",
     *,
@@ -1706,6 +1785,13 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "(legado: subido antes de la integración OpenSeadragon). Las "
             "métricas y mapas se muestran de todos modos."
         )
+
+    # ─── Etiqueta clínica del slide (visible en ambos modos) ────────────────
+    # Permite al patólogo asignar la GT slide-level desde el detalle, no
+    # solo desde el radio del upload o el tab 'Editar GT' de la cola.
+    # Útil cuando se sube un slide sin etiqueta y se decide tras ver la
+    # predicción del modelo.
+    _render_slide_label_panel(job)
 
     # ─── Vista 'Atención': top-K + métricas slide-level + barras + aviso ────
     if show_att:
