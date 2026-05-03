@@ -508,6 +508,19 @@ def _render_openseadragon_viewer(
             and pe["pred_probs"].shape[0] == len(pred_index))
         else None
     )
+    # GT por parche (cuando el H5 trae patch_categories ternarias). La X
+    # del color de la GT se dibuja en la esquina inferior izquierda solo
+    # cuando hay GT válida y pred != gt (el modelo falla en ese parche).
+    gt_index_arr = (
+        np.asarray(pe["gt_index"]).astype(np.int64)
+        if (pe is not None and "gt_index" in pe)
+        else None
+    )
+    valid_mask_arr = (
+        np.asarray(pe["valid_mask"]).astype(bool)
+        if (pe is not None and "valid_mask" in pe)
+        else None
+    )
 
     if (positions is not None and pred_index is not None
             and patch_raw_size is not None and len(positions) == len(pred_index)):
@@ -541,6 +554,14 @@ def _render_openseadragon_viewer(
                 item["probs"] = [round(float(v), 3) for v in pp]
             if i in corrections_by_idx:
                 item["corrected"] = corrections_by_idx[i]
+            # Marca de error: solo si el slide trae GT válida ternaria
+            # para este parche y la predicción no coincide con la GT.
+            if (gt_index_arr is not None and valid_mask_arr is not None
+                    and bool(valid_mask_arr[i])):
+                gt_idx = int(gt_index_arr[i])
+                if 0 <= gt_idx < len(CLASS_NAMES) and gt_idx != int(p):
+                    item["error"] = True
+                    item["gt_class"] = CLASS_NAMES[gt_idx]
             items.append(item)
         overlays_json = json.dumps(items)
 

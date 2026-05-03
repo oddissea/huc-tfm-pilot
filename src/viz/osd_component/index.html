@@ -78,6 +78,26 @@
 
     const sendStreamlit = window.__sendStreamlit;
 
+    function appendErrorMark(svg, color) {
+      // X de error en la esquina inferior izquierda. Dos líneas con
+      // class='gt-error' para que applyToggles las localice y actualice
+      // si cambia o.error/o.gt_class entre renders.
+      const positions = [
+        ["0.05", "0.78", "0.22", "0.95"],   // diagonal ↘
+        ["0.05", "0.95", "0.22", "0.78"],   // diagonal ↗
+      ];
+      for (const [x1, y1, x2, y2] of positions) {
+        const ln = document.createElementNS(SVG_NS, "line");
+        ln.setAttribute("x1", x1); ln.setAttribute("y1", y1);
+        ln.setAttribute("x2", x2); ln.setAttribute("y2", y2);
+        ln.setAttribute("stroke", color);
+        ln.setAttribute("stroke-width", "0.05");
+        ln.setAttribute("stroke-linecap", "round");
+        ln.setAttribute("class", "gt-error");
+        svg.appendChild(ln);
+      }
+    }
+
     function buildOverlayDiv(o) {
       const svg = document.createElementNS(SVG_NS, "svg");
       svg.setAttribute("viewBox", "0 0 1 1");
@@ -128,6 +148,14 @@
         svg.appendChild(dot);
       }
 
+      // Marcador de error: X del color de la GT en la esquina inferior
+      // izquierda. Solo aparece cuando el parche tiene GT ternaria válida
+      // y la predicción del modelo no coincide. Permite ver de un vistazo
+      // dónde el modelo se equivoca, con el color de la verdad real.
+      if (o.error && o.gt_class && CORR_COLORS[o.gt_class]) {
+        appendErrorMark(svg, CORR_COLORS[o.gt_class]);
+      }
+
       // Selección amarilla: visible solo cuando idx == selectedIdx.
       const selRect = document.createElementNS(SVG_NS, "rect");
       selRect.setAttribute("x", "0.04");
@@ -146,6 +174,7 @@
       let tip = `parche #${o.idx}`;
       if (o.cls) tip += `\npredicción F4: ${o.cls}`;
       if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
+      if (o.error && o.gt_class) tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
       if (o.att !== undefined) {
         const pct = (o.att_rel * 100).toFixed(0);
         tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
@@ -419,11 +448,29 @@
             dot.remove();
           }
 
+          // X de error: sincronizar con o.error/o.gt_class. Crea las
+          // dos líneas si es nuevo error, actualiza color si la GT
+          // cambió, borra si dejó de ser error (no debería ocurrir
+          // entre renders, pero por completitud).
+          if (svg) {
+            const errLines = svg.querySelectorAll("line.gt-error");
+            if (o.error && o.gt_class && CORR_COLORS[o.gt_class]) {
+              if (errLines.length === 0) {
+                appendErrorMark(svg, CORR_COLORS[o.gt_class]);
+              } else {
+                errLines.forEach(l => l.setAttribute("stroke", CORR_COLORS[o.gt_class]));
+              }
+            } else if (errLines.length > 0) {
+              errLines.forEach(l => l.remove());
+            }
+          }
+
           // Refrescar el title (hover) para reflejar la corrección
-          // actual sin recargar el iframe.
+          // y el error actuales sin recargar el iframe.
           let tip = `parche #${o.idx}`;
           if (o.cls) tip += `\npredicción F4: ${o.cls}`;
           if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
+          if (o.error && o.gt_class) tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
           if (o.att !== undefined) {
             const pct = (o.att_rel * 100).toFixed(0);
             tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
