@@ -1121,7 +1121,7 @@ def _render_slide_label_panel(
         )
     elif not is_editing:
         color = CLASS_COLORS.get(current_gt, "#888")
-        col_lbl, col_btn = st.columns([4, 1])
+        col_lbl, col_change, col_del = st.columns([3, 1, 1])
         with col_lbl:
             st.markdown(
                 f"🏷️ **Etiqueta clínica:** "
@@ -1129,7 +1129,7 @@ def _render_slide_label_panel(
                 f"{current_gt}</span>",
                 unsafe_allow_html=True,
             )
-        with col_btn:
+        with col_change:
             if st.button(
                 "✏️ Cambiar",
                 key=f"slide_label_change_btn_{job.job_id}",
@@ -1137,6 +1137,37 @@ def _render_slide_label_panel(
             ):
                 st.session_state[edit_key] = True
                 st.rerun()
+        with col_del:
+            with st.popover("🗑️ Borrar", use_container_width=True):
+                st.warning(
+                    "Esta acción borra la etiqueta clínica del portaobjetos "
+                    "y elimina `slide_label_audit.jsonl` (todo el histórico). "
+                    "**Es irreversible.** El slide volverá a estado *sin "
+                    "etiqueta* y dejará de contar para las métricas acumuladas."
+                )
+                phrase = "borrar etiqueta clínica"
+                confirm = st.text_input(
+                    f"Para confirmar, escribe exactamente: `{phrase}`",
+                    key=f"slide_label_delete_confirm_{job.job_id}",
+                    placeholder=phrase,
+                )
+                match = (confirm or "").strip().lower() == phrase
+                if st.button(
+                    "🗑️ Borrar definitivamente",
+                    key=f"slide_label_delete_btn_{job.job_id}",
+                    disabled=not match,
+                    type="primary",
+                ):
+                    # Borrar el slide_gt del meta.json — update_extra
+                    # elimina la clave si valor=None. Luego eliminar el
+                    # audit log entero (histórico). El JSONL puede no
+                    # existir si nunca se asignó vía panel.
+                    get_manager().update_extra(job.job_id, slide_gt=None)
+                    audit_path = job.job_dir / "slide_label_audit.jsonl"
+                    if audit_path.exists():
+                        audit_path.unlink()
+                    st.success("Etiqueta clínica y audit log borrados.")
+                    st.rerun()
 
         # Indicador de coincidencia con la predicción + histórico breve
         # de la última asignación / corrección.
