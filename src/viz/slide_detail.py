@@ -30,8 +30,10 @@ from PIL import Image
 
 from src.corrections import (
     CORRECTION_LABELS,
+    latest_slide_label_entry,
     list_corrections,
     record_correction,
+    record_slide_label,
     summarize_corrections,
 )
 from src.viz.osd_component import osd_viewer
@@ -1078,19 +1080,29 @@ def _entropy_per_patch(probs: np.ndarray) -> np.ndarray:
     return -np.sum(probs * np.log(probs + eps), axis=1)
 
 
-def _render_slide_label_panel(job: "Job") -> None:
+def _render_slide_label_panel(
+    job: "Job",
+    *,
+    pred_class: str | None = None,
+    pred_probs: list[float] | None = None,
+) -> None:
     """Panel para asignar/cambiar la etiqueta clínica slide-level.
 
     Estados:
     - **Sin etiqueta** (`slide_gt` no en {ADE, NOR, CAR}): aviso + selector
       para asignarla. Sin etiqueta el slide no entra en las 'Métricas
       acumuladas (slide-level)'.
-    - **Con etiqueta**: muestra la actual con su color. Botón 'Cambiar'
-      abre el selector para corregirla.
+    - **Con etiqueta**: muestra la actual con su color + indicador de si
+      coincide con la predicción del modelo o si la corrige (mostrando el
+      valor previo si lo hay). Botón 'Cambiar' abre el selector.
 
     Persiste en `job.extra['slide_gt']` vía manager.update_extra. Mismo
     campo que el radio del upload, así que las métricas acumuladas la
     recogen automáticamente sin más cambios.
+
+    Además registra cada asignación/cambio en `slide_label_audit.jsonl`
+    vía record_slide_label — paralelo al `corrections.jsonl` patch-level
+    para auditoría y futuro fine-tune del AttnMIL slide-level.
     """
     from src.jobs.manager import get_manager  # import local para evitar ciclo
 
@@ -1098,6 +1110,7 @@ def _render_slide_label_panel(job: "Job") -> None:
     has_label = current_gt in CLASS_NAMES
     edit_key = f"slide_label_edit_{job.job_id}"
     is_editing = bool(st.session_state.get(edit_key, False)) or not has_label
+    last_audit = latest_slide_label_entry(job.job_dir)
 
     st.divider()
     if not has_label:
@@ -1124,6 +1137,30 @@ def _render_slide_label_panel(job: "Job") -> None:
             ):
                 st.session_state[edit_key] = True
                 st.rerun()
+
+        # Indicador de coincidencia con la predicción + histórico breve
+        # de la última asignación / corrección.
+        bits = []
+        if pred_class:
+            if pred_class == current_gt:
+                bits.append(f"✓ Coincide con la predicción del modelo (**{pred_class}**)")
+            else:
+                bits.append(
+                    f"✏️ Distinta de la predicción del modelo "
+                    f"(modelo: **{pred_class}**, patólogo: **{current_gt}**)"
+                )
+        if last_audit is not None:
+            patologo = last_audit.patologo_id or "?"
+            ts = last_audit.ts.replace("T", " ").replace("Z", " UTC")
+            if last_audit.action == "cambiada" and last_audit.label_from:
+                bits.append(
+                    f"corregida desde **{last_audit.label_from}** "
+                    f"por *{patologo}* el {ts}"
+                )
+            else:
+                bits.append(f"asignada por *{patologo}* el {ts}")
+        if bits:
+            st.caption(" · ".join(bits))
         return
 
     # Modo edición — selector + guardar (+ cancelar si ya había etiqueta).
@@ -1142,7 +1179,19 @@ def _render_slide_label_panel(job: "Job") -> None:
             type="primary",
             use_container_width=True,
         ):
+            # Persistir en meta.json (slide_gt) — alimenta las métricas
+            # acumuladas. Después registramos en audit log para histórico
+            # y trazabilidad.
             get_manager().update_extra(job.job_id, slide_gt=new_label)
+            record_slide_label(
+                job.job_dir,
+                slide_uuid=job.job_id,
+                label_to=new_label,
+                label_from=current_gt if has_label else None,
+                pred_orig=pred_class,
+                pred_orig_probs=pred_probs,
+                patologo_id=_patologo_id(),
+            )
             st.session_state[edit_key] = False
             st.success(f"Etiqueta clínica guardada: **{new_label}**")
             st.rerun()
@@ -1790,8 +1839,10 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
     # Permite al patólogo asignar la GT slide-level desde el detalle, no
     # solo desde el radio del upload o el tab 'Editar GT' de la cola.
     # Útil cuando se sube un slide sin etiqueta y se decide tras ver la
-    # predicción del modelo.
-    _render_slide_label_panel(job)
+    # predicción del modelo. Pasamos pred_class + probs para que el panel
+    # registre la predicción original en el audit log y muestre si la
+    # etiqueta clínica coincide con el modelo o lo corrige.
+    _render_slide_label_panel(job, pred_class=pred_class, pred_probs=probs)
 
     # ─── Vista 'Atención': top-K + métricas slide-level + barras + aviso ────
     if show_att:
