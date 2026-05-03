@@ -133,6 +133,23 @@ st.markdown(
         opacity: 0.85 !important;
     }
 
+    /* === Métricas (st.metric) centradas bajo su título ================== */
+    body [data-testid="stMetric"],
+    body [data-testid="stMetric"] > div,
+    body [data-testid="stMetricLabel"],
+    body [data-testid="stMetricValue"],
+    body [data-testid="stMetricDelta"] {
+        text-align: center !important;
+        justify-content: center !important;
+    }
+    body [data-testid="stMetricLabel"] > div,
+    body [data-testid="stMetricValue"] > div,
+    body [data-testid="stMetricDelta"] > div {
+        width: 100% !important;
+        justify-content: center !important;
+        display: flex !important;
+    }
+
     /* === File uploader: traducción de textos hardcoded en inglés ========
        Streamlit no expone los strings "Drag and drop files here" ni
        "Limit XXMB per file" en config. Los ocultamos con font-size:0 y
