@@ -75,6 +75,9 @@
       "ADE": "rgb(255,127,14)", "NOR": "rgb(44,160,44)", "CAR": "rgb(31,119,180)",
       "HIP": "rgb(136,136,136)", "ART": "rgb(136,136,136)", "EXCLUDED": "rgb(136,136,136)",
     };
+    // Color de la X de error no-ternario (HIP/ART). Rojo matplotlib en
+    // lugar de gris — el gris se confundía con el fondo del visor.
+    const X_ERROR_NONTERNARY = "rgb(214,39,40)";
 
     const sendStreamlit = window.__sendStreamlit;
 
@@ -157,8 +160,8 @@
       //   tarea.
       if (o.error && o.gt_class) {
         const errColor = (o.error_kind === "non_ternary")
-          ? "rgb(136,136,136)"
-          : (CORR_COLORS[o.gt_class] || "rgb(136,136,136)");
+          ? X_ERROR_NONTERNARY
+          : (CORR_COLORS[o.gt_class] || X_ERROR_NONTERNARY);
         appendErrorMark(svg, errColor);
       }
 
@@ -458,8 +461,8 @@
             const errLines = svg.querySelectorAll("line.gt-error");
             if (o.error && o.gt_class) {
               const errColor = (o.error_kind === "non_ternary")
-                ? "rgb(136,136,136)"
-                : (CORR_COLORS[o.gt_class] || "rgb(136,136,136)");
+                ? X_ERROR_NONTERNARY
+                : (CORR_COLORS[o.gt_class] || X_ERROR_NONTERNARY);
               if (errLines.length === 0) {
                 appendErrorMark(svg, errColor);
               } else {

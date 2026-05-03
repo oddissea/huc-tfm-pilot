@@ -1954,6 +1954,22 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "parche para ver `#índice · clase · atención`. Las áreas blancas "
             "son zonas que el filtro de tejido descartó al parchear."
         )
+        # Leyenda visual de las marcas que pueden aparecer sobre los
+        # parches. Solo se muestra en modo Predicciones (donde están
+        # los bordes y posibles correcciones); las X de error solo
+        # aparecen si el slide trae GT por parche.
+        if show_pred:
+            legend_lines = [
+                "**Leyenda:**",
+                "- 🟦🟧🟩 borde del parche · color = predicción del modelo (clase F4)",
+                "- ⭕ esquina superior derecha · parche corregido por ti (color = etiqueta corregida)",
+            ]
+            if result.get("has_patch_gt"):
+                legend_lines.extend([
+                    "- ❌ esquina inferior izquierda en color · error del modelo (color = clase real GT, dentro de la tarea ternaria)",
+                    "- ❌ esquina inferior izquierda en rojo · GT real es HIP o ART (fuera de la tarea ternaria — el modelo no tiene esa clase como salida)",
+                ])
+            st.caption("\n".join(legend_lines))
     elif dzi_status == "generating":
         # El thread async de DZI todavía está corriendo. La cola fragment
         # rerunna cada 2 s y dispara rerun global cuando has_dzi cambia,
