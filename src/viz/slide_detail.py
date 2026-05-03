@@ -509,9 +509,15 @@ def _render_openseadragon_viewer(
             and pe["pred_probs"].shape[0] == len(pred_index))
         else None
     )
-    # GT por parche (cuando el H5 trae patch_categories ternarias). La X
-    # del color de la GT se dibuja en la esquina inferior izquierda solo
-    # cuando hay GT válida y pred != gt (el modelo falla en ese parche).
+    # GT por parche. La X de la esquina inferior izquierda aparece en
+    # dos casos:
+    # 1. GT ternaria válida (NOR/ADE/CAR) y pred != gt: X del color de
+    #    la GT real. El modelo se equivocó en la tarea ternaria.
+    # 2. GT real es HIP o ART (no-ternaria): X gris. El modelo predijo
+    #    una de las 3 clases pero el parche realmente no es de la
+    #    tarea ternaria — útil para que el patólogo identifique zonas
+    #    de tejido no-tumoral o artefactos sobre los que el modelo está
+    #    forzando una predicción.
     gt_index_arr = (
         np.asarray(pe["gt_index"]).astype(np.int64)
         if (pe is not None and "gt_index" in pe)
@@ -520,6 +526,11 @@ def _render_openseadragon_viewer(
     valid_mask_arr = (
         np.asarray(pe["valid_mask"]).astype(bool)
         if (pe is not None and "valid_mask" in pe)
+        else None
+    )
+    cats_raw_arr = (
+        np.asarray(pe["cats_raw"]).astype(str)
+        if (pe is not None and "cats_raw" in pe)
         else None
     )
 
@@ -555,14 +566,24 @@ def _render_openseadragon_viewer(
                 item["probs"] = [round(float(v), 3) for v in pp]
             if i in corrections_by_idx:
                 item["corrected"] = corrections_by_idx[i]
-            # Marca de error: solo si el slide trae GT válida ternaria
-            # para este parche y la predicción no coincide con la GT.
+            # Marca de error en dos casos (descritos arriba).
             if (gt_index_arr is not None and valid_mask_arr is not None
                     and bool(valid_mask_arr[i])):
+                # Caso 1: GT ternaria válida y pred != gt.
                 gt_idx = int(gt_index_arr[i])
                 if 0 <= gt_idx < len(CLASS_NAMES) and gt_idx != int(p):
                     item["error"] = True
                     item["gt_class"] = CLASS_NAMES[gt_idx]
+                    item["error_kind"] = "ternary"
+            elif cats_raw_arr is not None and i < len(cats_raw_arr):
+                # Caso 2: GT no-ternaria (HIP / ART). Cualquier predicción
+                # del modelo en clases ternarias es trivialmente "errónea"
+                # (no hay opción correcta), pero conviene marcarlo.
+                raw = str(cats_raw_arr[i])
+                if raw in ("HIP", "ART"):
+                    item["error"] = True
+                    item["gt_class"] = raw  # para mostrar en hover
+                    item["error_kind"] = "non_ternary"
             items.append(item)
         overlays_json = json.dumps(items)
 

@@ -148,12 +148,18 @@
         svg.appendChild(dot);
       }
 
-      // Marcador de error: X del color de la GT en la esquina inferior
-      // izquierda. Solo aparece cuando el parche tiene GT ternaria válida
-      // y la predicción del modelo no coincide. Permite ver de un vistazo
-      // dónde el modelo se equivoca, con el color de la verdad real.
-      if (o.error && o.gt_class && CORR_COLORS[o.gt_class]) {
-        appendErrorMark(svg, CORR_COLORS[o.gt_class]);
+      // Marcador de error: X en la esquina inferior izquierda. Dos casos:
+      // - error_kind='ternary': GT real es ADE/NOR/CAR distinta a la
+      //   predicción. Color = el de la GT (CORR_COLORS).
+      // - error_kind='non_ternary': GT real es HIP o ART (no clasificable
+      //   como ternaria). Color = gris. El patólogo ve dónde el modelo
+      //   está forzando una predicción ternaria sobre tejido fuera de
+      //   tarea.
+      if (o.error && o.gt_class) {
+        const errColor = (o.error_kind === "non_ternary")
+          ? "rgb(136,136,136)"
+          : (CORR_COLORS[o.gt_class] || "rgb(136,136,136)");
+        appendErrorMark(svg, errColor);
       }
 
       // Selección amarilla: visible solo cuando idx == selectedIdx.
@@ -174,7 +180,13 @@
       let tip = `parche #${o.idx}`;
       if (o.cls) tip += `\npredicción F4: ${o.cls}`;
       if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
-      if (o.error && o.gt_class) tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
+      if (o.error && o.gt_class) {
+        if (o.error_kind === "non_ternary") {
+          tip += `\n❌ GT real: ${o.gt_class} (no clasificable como ternario)`;
+        } else {
+          tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
+        }
+      }
       if (o.att !== undefined) {
         const pct = (o.att_rel * 100).toFixed(0);
         tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
@@ -441,29 +453,34 @@
             dot.remove();
           }
 
-          // X de error: sincronizar con o.error/o.gt_class. Crea las
-          // dos líneas si es nuevo error, actualiza color si la GT
-          // cambió, borra si dejó de ser error (no debería ocurrir
-          // entre renders, pero por completitud).
+          // X de error: sincronizar con o.error/o.gt_class/o.error_kind.
           if (svg) {
             const errLines = svg.querySelectorAll("line.gt-error");
-            if (o.error && o.gt_class && CORR_COLORS[o.gt_class]) {
+            if (o.error && o.gt_class) {
+              const errColor = (o.error_kind === "non_ternary")
+                ? "rgb(136,136,136)"
+                : (CORR_COLORS[o.gt_class] || "rgb(136,136,136)");
               if (errLines.length === 0) {
-                appendErrorMark(svg, CORR_COLORS[o.gt_class]);
+                appendErrorMark(svg, errColor);
               } else {
-                errLines.forEach(l => l.setAttribute("stroke", CORR_COLORS[o.gt_class]));
+                errLines.forEach(l => l.setAttribute("stroke", errColor));
               }
             } else if (errLines.length > 0) {
               errLines.forEach(l => l.remove());
             }
           }
 
-          // Refrescar el title (hover) para reflejar la corrección
-          // y el error actuales sin recargar el iframe.
+          // Refrescar el title (hover) sin recargar el iframe.
           let tip = `parche #${o.idx}`;
           if (o.cls) tip += `\npredicción F4: ${o.cls}`;
           if (o.probs) tip += `\nprobs F4: ADE=${o.probs[0].toFixed(3)} · NOR=${o.probs[1].toFixed(3)} · CAR=${o.probs[2].toFixed(3)}`;
-          if (o.error && o.gt_class) tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
+          if (o.error && o.gt_class) {
+            if (o.error_kind === "non_ternary") {
+              tip += `\n❌ GT real: ${o.gt_class} (no clasificable como ternario)`;
+            } else {
+              tip += `\n❌ GT real: ${o.gt_class} (modelo equivocado)`;
+            }
+          }
           if (o.att !== undefined) {
             const pct = (o.att_rel * 100).toFixed(0);
             tip += `\natención AttnMIL: ${o.att.toFixed(4)} (${pct}% del máximo)`;
