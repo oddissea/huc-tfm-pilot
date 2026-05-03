@@ -1382,7 +1382,10 @@ def _render_corrections_summary(summary: dict, job: "Job") -> None:
     # Borrado masivo de correcciones del slide. Confirmación por frase
     # exacta (no por timeout) para minimizar el riesgo de borrar
     # accidentalmente trabajo del patólogo.
-    with st.expander("🗑️ Borrar todas las correcciones de este portaobjetos"):
+    # Usamos st.popover (no st.expander) porque el panel completo ya
+    # vive dentro de un st.expander y Streamlit prohíbe anidar
+    # expanders. popover es un dropdown botón que no cuenta como expander.
+    with st.popover("🗑️ Borrar todas las correcciones de este portaobjetos"):
         st.warning(
             "Esta acción borra el `corrections.jsonl` del portaobjetos. "
             "**Es irreversible.** Las correcciones desaparecen de la "
