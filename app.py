@@ -57,6 +57,28 @@ st.set_page_config(
     layout="wide",
 )
 
+# Override del azul de st.info() para casarlo con el theme Oddissea.
+# Streamlit no expone colores de callouts en config.toml; se cambia via CSS.
+# Solo se toca info (mensajes explicativos); success/warning/error mantienen
+# su semántica clínica (verde / amarillo / rojo).
+st.markdown(
+    """
+    <style>
+    [data-testid="stAlertContentInfo"] {
+        background-color: #F0E6D6 !important;
+        color: #261B17 !important;
+        border-left: 3px solid #7A5A3F !important;
+    }
+    [data-testid="stAlertContentInfo"] svg,
+    [data-testid="stAlertContentInfo"] [data-testid="stIcon"] {
+        color: #7A5A3F !important;
+        fill: #7A5A3F !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🩺 HUC TFM Pilot")
 st.caption(
     "Demo interactiva del modelo F4 (BiT-M doble canal) + AttnMIL ternario "
