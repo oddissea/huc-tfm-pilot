@@ -93,15 +93,19 @@
       //  - kind === "ternary" (default): X. El modelo se equivocó
       //    dentro de la tarea, color = clase real GT.
       if (kind === "non_ternary") {
-        const ring = document.createElementNS(SVG_NS, "circle");
-        ring.setAttribute("cx", "0.135");
-        ring.setAttribute("cy", "0.865");
-        ring.setAttribute("r", "0.085");
-        ring.setAttribute("fill", "none");
-        ring.setAttribute("stroke", color);
-        ring.setAttribute("stroke-width", "0.05");
-        ring.setAttribute("class", "gt-error");
-        svg.appendChild(ring);
+        // Disco rojo pequeño (relleno) en esquina inferior izquierda.
+        // Más pequeño que el ⭕ "corregido" (sup-der, r=0.10) y de color
+        // siempre rojo, para que no haya ambigüedad visual entre los dos
+        // marcadores circulares del parche.
+        const dot = document.createElementNS(SVG_NS, "circle");
+        dot.setAttribute("cx", "0.13");
+        dot.setAttribute("cy", "0.87");
+        dot.setAttribute("r", "0.06");
+        dot.setAttribute("fill", color);
+        dot.setAttribute("stroke", "#fff");
+        dot.setAttribute("stroke-width", "0.015");
+        dot.setAttribute("class", "gt-error");
+        svg.appendChild(dot);
         return;
       }
       const positions = [
@@ -476,9 +480,10 @@
           }
 
           // Marca de error: sincronizar con o.error/o.gt_class/o.error_kind.
-          // Puede ser <line> (X ternaria) o <circle> (anillo HIP/ART);
-          // por eso usamos `.gt-error` en vez de `line.gt-error`. Si el
-          // tipo cambia entre renders, regeneramos el marcador.
+          // Puede ser <line> (X ternaria, color via stroke) o <circle>
+          // (disco rojo HIP/ART, color via fill). Si el tipo cambia
+          // entre renders, regeneramos. Si solo cambia el color,
+          // actualizamos el atributo correcto según la forma.
           if (svg) {
             const errMarks = svg.querySelectorAll(".gt-error");
             if (o.error && o.gt_class) {
@@ -490,8 +495,10 @@
               if (currentTag !== wantedTag) {
                 errMarks.forEach(m => m.remove());
                 appendErrorMark(svg, errColor, o.error_kind);
-              } else {
+              } else if (wantedTag === "line") {
                 errMarks.forEach(m => m.setAttribute("stroke", errColor));
+              } else {
+                errMarks.forEach(m => m.setAttribute("fill", errColor));
               }
             } else if (errMarks.length > 0) {
               errMarks.forEach(m => m.remove());
