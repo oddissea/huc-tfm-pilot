@@ -30,6 +30,7 @@ def osd_viewer(
     view_corrected: bool = False,
     show_selected_borders: bool = True,
     pan_to_selected: bool = False,
+    show_out_of_task: bool = True,
     key: str | None = None,
 ) -> dict | None:
     """Renderiza el visor OpenSeadragon con click-events y toggles.
@@ -71,6 +72,7 @@ def osd_viewer(
         view_corrected=view_corrected,
         show_selected_borders=show_selected_borders,
         pan_to_selected=pan_to_selected,
+        show_out_of_task=show_out_of_task,
         key=key,
         default=None,
     )

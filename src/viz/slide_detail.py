@@ -468,6 +468,7 @@ def _render_openseadragon_viewer(
     view_corrected: bool = False,
     show_selected_borders: bool = True,
     pan_to_selected: bool = False,
+    show_out_of_task: bool = True,
     enable_click_capture: bool = False,
 ) -> dict | None:
     """Si el job tiene `slide.dzi`, embebe un visor OpenSeadragon
@@ -602,6 +603,7 @@ def _render_openseadragon_viewer(
             view_corrected=view_corrected,
             show_selected_borders=show_selected_borders,
             pan_to_selected=pan_to_selected,
+            show_out_of_task=show_out_of_task,
             key=f"osd_{job.job_id}",
         )
 
@@ -1513,7 +1515,7 @@ def _render_corrections_panel(
 
         # Toggle: ver el visor con la predicción del modelo (default)
         # vs con las correcciones aplicadas. Disponible siempre.
-        col_t1, col_t2 = st.columns(2)
+        col_t1, col_t2, col_t3 = st.columns(3)
         with col_t1:
             st.toggle(
                 "🎨 Mostrar correcciones aplicadas en el visor",
@@ -1529,6 +1531,17 @@ def _render_corrections_panel(
                 help="OFF: oculta el borde de etiqueta y el highlight amarillo "
                      "del parche seleccionado para examinarlo sin ruido visual. "
                      "El círculo de 'corregido' (esquina) sigue siempre visible.",
+            )
+        with col_t3:
+            st.toggle(
+                "● Mostrar parches fuera de tarea (HIP/ART)",
+                value=True,
+                key=f"show_out_of_task_{job.job_id}",
+                help="ON (default): muestra el disco rojo sobre los parches con "
+                     "GT HIP/ART y los marcadores rojos de correcciones a "
+                     "HIP/ART/EXCLUDED. OFF: oculta esa información, dejando el "
+                     "visor coherente con el espacio ternario de la tarea (lo "
+                     "que vio el modelo en entrenamiento).",
             )
 
         # Sin parche seleccionado: pista para empezar + saltamos a
@@ -1931,6 +1944,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         view_corrected_flag = False
         show_sel_borders_flag = True
         pan_to_selected_flag = False
+        show_out_of_task_flag = True
         if show_pred:
             widget_key = f"corr_idx_{job.job_id}"
             pending_key = f"corr_pending_target_{job.job_id}"
@@ -1959,6 +1973,9 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             show_sel_borders_flag = bool(
                 st.session_state.get(f"show_sel_borders_{job.job_id}", True)
             )
+            show_out_of_task_flag = bool(
+                st.session_state.get(f"show_out_of_task_{job.job_id}", True)
+            )
         # En modo predicciones, usar el custom component (con click
         # capture). En modo atención, mantener el inline (más simple,
         # sin necesidad de captura — el patólogo solo está mirando los
@@ -1977,6 +1994,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             view_corrected=view_corrected_flag,
             show_selected_borders=show_sel_borders_flag,
             pan_to_selected=pan_to_selected_flag,
+            show_out_of_task=show_out_of_task_flag,
             enable_click_capture=show_pred,
         )
 

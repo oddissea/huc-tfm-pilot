@@ -71,13 +71,17 @@
     const SVG_NS = "http://www.w3.org/2000/svg";
 
     // Paleta unificada con CLASS_COLORS de slide_detail.py (matplotlib).
+    // HIP/ART/EXCLUDED usan rojo matplotlib (no gris) — coherencia visual
+    // con el disco rojo de GT no-ternario: rojo = "fuera de la tarea
+    // ternaria" en cualquier contexto del visor (GT o corrección).
+    const OUT_OF_TASK_COLOR = "rgb(214,39,40)";
     const CORR_COLORS = {
       "ADE": "rgb(255,127,14)", "NOR": "rgb(44,160,44)", "CAR": "rgb(31,119,180)",
-      "HIP": "rgb(136,136,136)", "ART": "rgb(136,136,136)", "EXCLUDED": "rgb(136,136,136)",
+      "HIP": OUT_OF_TASK_COLOR, "ART": OUT_OF_TASK_COLOR, "EXCLUDED": OUT_OF_TASK_COLOR,
     };
-    // Color de la X de error no-ternario (HIP/ART). Rojo matplotlib en
-    // lugar de gris — el gris se confundía con el fondo del visor.
-    const X_ERROR_NONTERNARY = "rgb(214,39,40)";
+    // Alias retrocompatible (GT no-ternario sigue usando este nombre en el
+    // resto del código).
+    const X_ERROR_NONTERNARY = OUT_OF_TASK_COLOR;
 
     const sendStreamlit = window.__sendStreamlit;
 
@@ -426,7 +430,9 @@
       const showPred = args.show_predictions !== false;
       const showAtt = args.show_attention === true;
       const showSelBorders = args.show_selected_borders !== false;  // default true
+      const showOutOfTask = args.show_out_of_task !== false;       // default true
       viewCorrected = args.view_corrected === true;
+      const NONTERNARY_LABELS = new Set(["HIP", "ART", "EXCLUDED"]);
 
       for (const o of overlaysData) {
         const isSelected = (selectedIdx != null && o.idx === selectedIdx);
@@ -434,6 +440,13 @@
         // de etiqueta) como selRect (borde amarillo) si el patólogo
         // pidió 'bordes off' — para examinar el parche limpio.
         const hideForExamen = isSelected && !showSelBorders;
+        // Si el parche es "fuera de tarea" (GT HIP/ART o corregido a
+        // HIP/ART/EXCLUDED) y el toggle está OFF, ocultamos sus marcas
+        // para dejar el visor coherente con el espacio de la tarea
+        // ternaria (lo que vio el modelo en train).
+        const isOutOfTaskByGt = o.error && o.gt_class && o.error_kind === "non_ternary";
+        const isOutOfTaskByCorr = o.corrected && NONTERNARY_LABELS.has(o.corrected);
+        const hideOutOfTask = !showOutOfTask && (isOutOfTaskByGt || isOutOfTaskByCorr);
 
         const sr = strokeRects.get(o.idx);
         if (sr) {
@@ -442,7 +455,11 @@
             strokeColor = CORR_COLORS[o.corrected];
           }
           sr.setAttribute("stroke", strokeColor);
-          sr.style.display = (showPred && !hideForExamen) ? "" : "none";
+          // El borde se oculta si:
+          // - showPred está OFF
+          // - el parche está siendo examinado limpio (bordes off)
+          // - es fuera de tarea y el toggle 'out of task' está OFF
+          sr.style.display = (showPred && !hideForExamen && !hideOutOfTask) ? "" : "none";
         }
         const fr = fillRects.get(o.idx);
         if (fr) {
@@ -464,7 +481,12 @@
           // aparezca sin recargar el iframe al guardar una corrección.
           const svg = div.querySelector("svg");
           let dot = svg ? svg.querySelector("circle.corr-dot") : null;
-          if (o.corrected && CORR_COLORS[o.corrected]) {
+          // Ocultamos el círculo de corrección si la corrección es a
+          // HIP/ART/EXCLUDED y el toggle 'out of task' está OFF.
+          const showCorrDot = o.corrected
+            && CORR_COLORS[o.corrected]
+            && !(isOutOfTaskByCorr && !showOutOfTask);
+          if (showCorrDot) {
             if (!dot && svg) {
               dot = document.createElementNS(SVG_NS, "circle");
               dot.setAttribute("cx", "0.85"); dot.setAttribute("cy", "0.15");
@@ -486,7 +508,11 @@
           // actualizamos el atributo correcto según la forma.
           if (svg) {
             const errMarks = svg.querySelectorAll(".gt-error");
-            if (o.error && o.gt_class) {
+            // Si es disco rojo non_ternary y el toggle 'out of task'
+            // está OFF, ocultamos el marcador (no se renderiza).
+            const showErrMark = o.error && o.gt_class
+              && !(isOutOfTaskByGt && !showOutOfTask);
+            if (showErrMark) {
               const errColor = (o.error_kind === "non_ternary")
                 ? X_ERROR_NONTERNARY
                 : (CORR_COLORS[o.gt_class] || X_ERROR_NONTERNARY);
