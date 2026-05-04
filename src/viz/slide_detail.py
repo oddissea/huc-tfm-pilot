@@ -2016,7 +2016,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                         " error ternario (color = GT real)"
                     ),
                     (
-                        "<span style='color:rgb(214,39,40);font-weight:700'>✕</span>"
+                        "<span style='color:rgb(214,39,40);font-weight:700'>○</span>"
                         " HIP/ART (fuera de la tarea ternaria)"
                     ),
                 ])

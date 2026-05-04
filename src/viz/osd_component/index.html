@@ -81,10 +81,29 @@
 
     const sendStreamlit = window.__sendStreamlit;
 
-    function appendErrorMark(svg, color) {
-      // X de error en la esquina inferior izquierda. Dos líneas con
-      // class='gt-error' para que applyToggles las localice y actualice
-      // si cambia o.error/o.gt_class entre renders.
+    function appendErrorMark(svg, color, kind) {
+      // Marca en esquina inferior izquierda. Dos formas según el tipo
+      // de error, ambas con class='gt-error' para que applyToggles
+      // las localice y actualice (color/forma) entre renders.
+      //
+      //  - kind === "non_ternary": círculo vacío rojo. Significa
+      //    "fuera de la tarea ternaria" (parche HIP o ART, el modelo
+      //    no aprendió esa categoría). Visualmente leible como
+      //    "no aplica" en lugar de "error".
+      //  - kind === "ternary" (default): X. El modelo se equivocó
+      //    dentro de la tarea, color = clase real GT.
+      if (kind === "non_ternary") {
+        const ring = document.createElementNS(SVG_NS, "circle");
+        ring.setAttribute("cx", "0.135");
+        ring.setAttribute("cy", "0.865");
+        ring.setAttribute("r", "0.085");
+        ring.setAttribute("fill", "none");
+        ring.setAttribute("stroke", color);
+        ring.setAttribute("stroke-width", "0.05");
+        ring.setAttribute("class", "gt-error");
+        svg.appendChild(ring);
+        return;
+      }
       const positions = [
         ["0.05", "0.78", "0.22", "0.95"],   // diagonal ↘
         ["0.05", "0.95", "0.22", "0.78"],   // diagonal ↗
@@ -162,7 +181,7 @@
         const errColor = (o.error_kind === "non_ternary")
           ? X_ERROR_NONTERNARY
           : (CORR_COLORS[o.gt_class] || X_ERROR_NONTERNARY);
-        appendErrorMark(svg, errColor);
+        appendErrorMark(svg, errColor, o.error_kind);
       }
 
       // Selección amarilla: visible solo cuando idx == selectedIdx.
@@ -456,20 +475,26 @@
             dot.remove();
           }
 
-          // X de error: sincronizar con o.error/o.gt_class/o.error_kind.
+          // Marca de error: sincronizar con o.error/o.gt_class/o.error_kind.
+          // Puede ser <line> (X ternaria) o <circle> (anillo HIP/ART);
+          // por eso usamos `.gt-error` en vez de `line.gt-error`. Si el
+          // tipo cambia entre renders, regeneramos el marcador.
           if (svg) {
-            const errLines = svg.querySelectorAll("line.gt-error");
+            const errMarks = svg.querySelectorAll(".gt-error");
             if (o.error && o.gt_class) {
               const errColor = (o.error_kind === "non_ternary")
                 ? X_ERROR_NONTERNARY
                 : (CORR_COLORS[o.gt_class] || X_ERROR_NONTERNARY);
-              if (errLines.length === 0) {
-                appendErrorMark(svg, errColor);
+              const wantedTag = (o.error_kind === "non_ternary") ? "circle" : "line";
+              const currentTag = errMarks.length > 0 ? errMarks[0].tagName.toLowerCase() : null;
+              if (currentTag !== wantedTag) {
+                errMarks.forEach(m => m.remove());
+                appendErrorMark(svg, errColor, o.error_kind);
               } else {
-                errLines.forEach(l => l.setAttribute("stroke", errColor));
+                errMarks.forEach(m => m.setAttribute("stroke", errColor));
               }
-            } else if (errLines.length > 0) {
-              errLines.forEach(l => l.remove());
+            } else if (errMarks.length > 0) {
+              errMarks.forEach(m => m.remove());
             }
           }
 
