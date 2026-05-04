@@ -1022,17 +1022,37 @@ def _render_patch_predictions(
     attention: np.ndarray | None = None,
     job: "Job | None" = None,
     slide_pred_class: str = "CAR",
+    show_out_of_task: bool = True,
 ) -> None:
     """Sección 'Predicciones por parche' (sin GT). Bar chart de distribución
     + visor OpenSeadragon con overlay de bordes coloreados (si hay DZI) +
-    inspector individual con la imagen del parche a tamaño nativo."""
-    pred_index = np.asarray(patch_eval.get("pred_index"), dtype=np.int64)
-    if pred_index.size == 0:
+    inspector individual con la imagen del parche a tamaño nativo.
+
+    `show_out_of_task` controla si el bar chart cuenta los parches HIP/ART
+    (cuando hay GT que los identifique). En default True usa todos los
+    parches (output crudo del modelo). En False filtra HIP/ART/EXCLUDED
+    para mostrar solo los parches del espacio ternario que vio el modelo
+    en entrenamiento — coherente con el toggle del visor.
+    """
+    pred_index_raw = np.asarray(patch_eval.get("pred_index"), dtype=np.int64)
+    if pred_index_raw.size == 0:
         return
+    valid_mask = patch_eval.get("valid_mask")
+    n_total = int(pred_index_raw.size)
+    n_excluded = 0
+    if not show_out_of_task and valid_mask is not None:
+        valid_mask_arr = np.asarray(valid_mask)
+        if valid_mask_arr.size == n_total and not valid_mask_arr.all():
+            pred_index = pred_index_raw[valid_mask_arr]
+            n_excluded = int((~valid_mask_arr).sum())
+        else:
+            pred_index = pred_index_raw
+    else:
+        pred_index = pred_index_raw
     job_id = job.job_id if job is not None else None
     st.divider()
     st.subheader("Predicciones a nivel de parche")
-    st.caption(
+    base_caption = (
         "Distribución de la salida del clasificador F4 (no del AttnMIL) sobre "
         "cada parche del portaobjetos. Refleja la heterogeneidad interna del "
         "tejido independientemente del veredicto agregado a nivel de slide. "
@@ -1040,6 +1060,13 @@ def _render_patch_predictions(
         "eso la predicción slide-level no tiene por qué coincidir con la "
         "clase mayoritaria de las barras."
     )
+    if n_excluded:
+        base_caption += (
+            f" **Toggle 'fuera de tarea' OFF**: se excluyeron {n_excluded} "
+            f"parches HIP/ART/EXCLUDED del conteo "
+            f"(quedan {len(pred_index)}/{n_total})."
+        )
+    st.caption(base_caption)
     st.plotly_chart(_patch_predictions_bars(pred_index), use_container_width=True)
 
     # Antiguo 'Inspector parche en detalle' eliminado: con el visor
@@ -2171,6 +2198,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             attention=attention,
             job=job,
             slide_pred_class=pred_class,
+            show_out_of_task=show_out_of_task_flag,
         )
         if result.get("has_patch_gt"):
             _render_patch_validation(patch_eval, result)
