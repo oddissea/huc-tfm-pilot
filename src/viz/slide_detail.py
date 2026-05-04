@@ -1996,34 +1996,37 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             "parche para ver `#índice · clase · atención`. Las áreas blancas "
             "son zonas que el filtro de tejido descartó al parchear."
         )
-        # Leyenda visual compacta (una sola línea con iconos). Solo se
-        # muestra en modo Predicciones; las X de error sólo aparecen si
-        # el slide trae GT por parche. Usamos HTML inline para que las
-        # X coincidan en color con las que dibuja el SVG del visor.
+        # Leyenda visual compacta (una sola línea). Estructura:
+        # las tres clases NOR/ADE/CAR con su código de color y, entre
+        # paréntesis, las marcas que usan ese mismo código (bordes,
+        # ⭕ correcciones y ✕✕✕ errores ternarios — solo si el slide
+        # trae GT por parche). El disco rojo pequeño de HIP/ART queda
+        # fuera del paréntesis: es semánticamente distinto (fuera de
+        # tarea, no error). HTML inline para que las X y el disco
+        # coincidan en color con lo que dibuja el SVG del visor.
         if show_pred:
-            legend_parts = [
-                "🟢 NOR",
-                "🟠 ADE",
-                "🔵 CAR",
-                "⭕ corregido",
-            ]
-            if result.get("has_patch_gt"):
-                legend_parts.extend([
-                    (
-                        "<span style='color:#2ca02c;font-weight:700'>✕</span>"
-                        "<span style='color:#ff7f0e;font-weight:700'>✕</span>"
-                        "<span style='color:#1f77b4;font-weight:700'>✕</span>"
-                        " error ternario (color = GT real)"
-                    ),
-                    (
-                        "<span style='color:rgb(214,39,40);font-size:0.7em;"
-                        "vertical-align:middle;'>●</span>"
-                        " HIP/ART (fuera de la tarea ternaria)"
-                    ),
-                ])
+            has_gt = bool(result.get("has_patch_gt"))
+            inside = "bordes y ⭕ correcciones"
+            if has_gt:
+                inside = (
+                    "bordes, ⭕ correcciones y "
+                    "<span style='color:#2ca02c;font-weight:700'>✕</span>"
+                    "<span style='color:#ff7f0e;font-weight:700'>✕</span>"
+                    "<span style='color:#1f77b4;font-weight:700'>✕</span>"
+                    " errores"
+                )
+            legend_html = (
+                "🟢 NOR · 🟠 ADE · 🔵 CAR (" + inside + ")"
+            )
+            if has_gt:
+                legend_html += (
+                    " · <span style='color:rgb(214,39,40);font-size:0.7em;"
+                    "vertical-align:middle;'>●</span>"
+                    " HIP/ART (fuera de tarea)"
+                )
             st.markdown(
                 "<div style='font-size:0.875rem;opacity:0.85;'>"
-                + " · ".join(legend_parts)
+                + legend_html
                 + "</div>",
                 unsafe_allow_html=True,
             )
