@@ -469,14 +469,14 @@
       }
 
       for (const o of overlaysData) {
-        // Fase 0 v4: el highlight amarillo aplica tanto al ancla
-        // (selectedIdx single) como a cualquier miembro del set
-        // multi-select (selectedIdxSet). Visualmente son idénticos:
-        // la distinción ancla vs lote es solo conceptual, y el ancla
-        // queda implícita al ser el target del pan/zoom.
-        const isAnchor = (selectedIdx != null && o.idx === selectedIdx);
-        const isInSet = selectedIdxSet.has(o.idx);
-        const isSelected = isAnchor || isInSet;
+        // Fase 0 v4: el highlight amarillo se basa ÚNICAMENTE en
+        // pertenencia al set (selectedIdxSet). El ancla (selectedIdx)
+        // queda como concepto interno para pan/zoom, sin valor visual:
+        // si el patólogo hace Cmd+click toggle-off, el patch sale del
+        // set y debe perder el amarillo aunque temporalmente sea el
+        // ancla del próximo click. Sin esto, un OR ancla∨set causaría
+        // que el toggle-off no parezca quitar el highlight.
+        const isSelected = selectedIdxSet.has(o.idx);
         // Para el parche seleccionado, ocultar tanto strokeRect (borde
         // de etiqueta) como selRect (borde amarillo) si el patólogo
         // pidió 'bordes off' — para examinar el parche limpio.
