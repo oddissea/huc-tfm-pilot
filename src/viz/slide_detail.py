@@ -1910,27 +1910,33 @@ def _render_corrections_panel(
                     st.success(
                         f"Correcciones guardadas: {len(save_idxs)} parches → {new_label}"
                     )
-                # Reset selectivo del form tras guardar: vaciamos el set
-                # canónico (idx_set/idx_last) y el text_input de rango
-                # para que el patólogo no aplique sin querer el mismo
-                # lote dos veces y el slot de rango quede limpio para
-                # la siguiente sesión de lote. Mantenemos:
-                #   - number_input: conserva el ancla. El patólogo
-                #     puede pulsar Enter de nuevo si quiere repetir.
-                #     CRÍTICO: si lo limpiásemos, patch_idx pasaría a
-                #     None y el panel haría early-return antes de
-                #     renderizar la segmented_control, lo que provoca
-                #     que Streamlit purgue el estado del widget y la
-                #     etiqueta arranque en None tras la siguiente
-                #     selección de parche → save button disabled.
-                #   - segmented_control de etiqueta: el patólogo
-                #     puede encadenar correcciones con la misma clase
-                #     sin re-seleccionar.
+                # Reset del form tras guardar: vaciamos el set canónico,
+                # el text_input de rango, los errores del parser, la
+                # etiqueta (widget + persist) y el campo de comentario.
+                # Mantenemos el number_input con su ancla por dos
+                # razones: (1) no disparar el early-return que purgaría
+                # widgets (aunque el double-key de la etiqueta lo
+                # mitiga, evitarlo es más limpio); (2) el patólogo
+                # suele querer ver dónde se quedó el último parche
+                # corregido para retomar desde ahí o pulsar
+                # "Siguiente más incierto".
+                #
+                # Al limpiar la etiqueta forzamos al patólogo a re-
+                # seleccionar la clase para el próximo guardado: evita
+                # que un click distraído sobre Guardar registre una
+                # corrección con la etiqueta del parche anterior.
                 st.session_state[idx_set_key] = ()
                 st.session_state[idx_last_key] = None
                 if range_text_key in st.session_state:
                     st.session_state[range_text_key] = ""
                 st.session_state[range_errors_key] = []
+                if label_key_widget in st.session_state:
+                    st.session_state[label_key_widget] = None
+                if label_key_persist in st.session_state:
+                    st.session_state[label_key_persist] = None
+                comment_key = f"corr_comment_{job.job_id}"
+                if comment_key in st.session_state:
+                    st.session_state[comment_key] = ""
                 st.rerun()
         with col_info:
             if range_errors_active:
