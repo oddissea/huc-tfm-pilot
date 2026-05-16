@@ -1741,6 +1741,20 @@ def _render_corrections_panel(
                 # pending_pan=True para que el visor navegue al destino.
                 st.session_state[pending_key] = next_uncertain
                 st.session_state[f"corr_pending_pan_{job.job_id}"] = True
+                # Al saltar a un parche nuevo, deseleccionamos la
+                # etiqueta y vaciamos el comentario para forzar al
+                # patólogo a tomar una decisión consciente sobre el
+                # nuevo parche (mismo razonamiento que post-save).
+                # Streamlit permite mutar estas keys aquí porque la
+                # segmented_control y el text_input de comentario
+                # aún no se han instanciado en este rerun (están
+                # después del early-return de patch_idx None).
+                if label_key_widget in st.session_state:
+                    st.session_state[label_key_widget] = None
+                if label_key_persist in st.session_state:
+                    st.session_state[label_key_persist] = None
+                if comment_key in st.session_state:
+                    st.session_state[comment_key] = ""
                 st.rerun()
 
         # Toggle: ver el visor con la predicción del modelo (default)
