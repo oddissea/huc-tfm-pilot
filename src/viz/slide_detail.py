@@ -1581,14 +1581,17 @@ def _render_corrections_panel(
             st.session_state[range_errors_key] = errors
             if not parsed:
                 # Input totalmente inválido (cero tokens utilizables).
-                # Limpiamos el estado canónico Y el number_input como
-                # safety: si el patólogo había tecleado algo basura
-                # antes, no queremos que un valor stale del number_input
-                # haga creer que hay un parche seleccionado para guardar.
+                # Vaciamos el set canónico (no hay lote aplicable) pero
+                # NO tocamos el number_input. Por qué: si limpiásemos
+                # widget_key, patch_idx pasaría a None y la función
+                # haría early-return antes de renderizar la
+                # segmented_control, lo que provoca que Streamlit purgue
+                # el estado del widget y la etiqueta arranque en None
+                # al volver a tener parche. La protección contra "save
+                # accidental sobre el #idx stale" la añadimos en el
+                # disabled del save button (range_errors_active).
                 st.session_state[idx_set_key] = ()
                 st.session_state[idx_last_key] = None
-                if widget_key in st.session_state:
-                    st.session_state[widget_key] = None
                 return
             st.session_state[idx_set_key] = parsed
             st.session_state[idx_last_key] = parsed[-1]
@@ -1844,13 +1847,19 @@ def _render_corrections_panel(
             if len(save_idxs) <= 1
             else f"💾 Aplicar a {len(save_idxs)} parches"
         )
+        # Si el parser tiene errores activos (texto inválido sin tokens
+        # útiles) deshabilitamos el guardado para que el patólogo no
+        # registre por error una corrección sobre el #idx stale del
+        # number_input mientras el text_input contiene basura. El
+        # caption del col_info indica la causa.
+        range_errors_active = bool(st.session_state.get(range_errors_key))
 
         col_save, col_info = st.columns([1, 4])
         with col_save:
             if st.button(
                 save_label,
                 key=f"corr_save_{job.job_id}",
-                disabled=new_label is None,
+                disabled=(new_label is None or range_errors_active),
                 type="primary",
             ):
                 # Lote: aplicamos la misma etiqueta a todos los idx del
@@ -1883,24 +1892,35 @@ def _render_corrections_panel(
                     st.success(
                         f"Correcciones guardadas: {len(save_idxs)} parches → {new_label}"
                     )
-                # Reset completo del form tras guardar: vaciamos set,
-                # last, number_input, text_input y los avisos del
-                # parser. Mantenemos la etiqueta seleccionada
-                # (segmented_control) para no friccionar al patólogo
-                # cuando aplica varias correcciones consecutivas con
-                # la misma clase. Streamlit acepta modificar el state
-                # de widgets ya instanciados desde el handler de un
-                # botón: el cambio se aplicará en el próximo rerun.
+                # Reset selectivo del form tras guardar: vaciamos el set
+                # canónico (idx_set/idx_last) y el text_input de rango
+                # para que el patólogo no aplique sin querer el mismo
+                # lote dos veces y el slot de rango quede limpio para
+                # la siguiente sesión de lote. Mantenemos:
+                #   - number_input: conserva el ancla. El patólogo
+                #     puede pulsar Enter de nuevo si quiere repetir.
+                #     CRÍTICO: si lo limpiásemos, patch_idx pasaría a
+                #     None y el panel haría early-return antes de
+                #     renderizar la segmented_control, lo que provoca
+                #     que Streamlit purgue el estado del widget y la
+                #     etiqueta arranque en None tras la siguiente
+                #     selección de parche → save button disabled.
+                #   - segmented_control de etiqueta: el patólogo
+                #     puede encadenar correcciones con la misma clase
+                #     sin re-seleccionar.
                 st.session_state[idx_set_key] = ()
                 st.session_state[idx_last_key] = None
-                if widget_key in st.session_state:
-                    st.session_state[widget_key] = None
                 if range_text_key in st.session_state:
                     st.session_state[range_text_key] = ""
                 st.session_state[range_errors_key] = []
                 st.rerun()
         with col_info:
-            if new_label is None:
+            if range_errors_active:
+                st.caption(
+                    "Hay errores en el rango de parches. Corrígelo o "
+                    "vacíalo para activar el guardado."
+                )
+            elif new_label is None:
                 st.caption("Selecciona una etiqueta para activar el guardado.")
 
         # Resumen de correcciones de este slide (con parche seleccionado).
