@@ -1580,7 +1580,15 @@ def _render_corrections_panel(
             parsed, errors = _parse_idx_range_text(raw, n_patches)
             st.session_state[range_errors_key] = errors
             if not parsed:
-                # Solo errores: no se modifica el estado canónico.
+                # Input totalmente inválido (cero tokens utilizables).
+                # Limpiamos el estado canónico Y el number_input como
+                # safety: si el patólogo había tecleado algo basura
+                # antes, no queremos que un valor stale del number_input
+                # haga creer que hay un parche seleccionado para guardar.
+                st.session_state[idx_set_key] = ()
+                st.session_state[idx_last_key] = None
+                if widget_key in st.session_state:
+                    st.session_state[widget_key] = None
                 return
             st.session_state[idx_set_key] = parsed
             st.session_state[idx_last_key] = parsed[-1]
@@ -1875,10 +1883,21 @@ def _render_corrections_panel(
                     st.success(
                         f"Correcciones guardadas: {len(save_idxs)} parches → {new_label}"
                     )
-                # Tras guardar, vaciamos el set y last canónicos para
-                # que la próxima selección arranque limpia.
+                # Reset completo del form tras guardar: vaciamos set,
+                # last, number_input, text_input y los avisos del
+                # parser. Mantenemos la etiqueta seleccionada
+                # (segmented_control) para no friccionar al patólogo
+                # cuando aplica varias correcciones consecutivas con
+                # la misma clase. Streamlit acepta modificar el state
+                # de widgets ya instanciados desde el handler de un
+                # botón: el cambio se aplicará en el próximo rerun.
                 st.session_state[idx_set_key] = ()
                 st.session_state[idx_last_key] = None
+                if widget_key in st.session_state:
+                    st.session_state[widget_key] = None
+                if range_text_key in st.session_state:
+                    st.session_state[range_text_key] = ""
+                st.session_state[range_errors_key] = []
                 st.rerun()
         with col_info:
             if new_label is None:
