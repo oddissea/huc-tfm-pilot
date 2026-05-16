@@ -2313,8 +2313,38 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             last_seen_key = f"corr_last_click_ts_{job.job_id}"
             if st.session_state.get(last_seen_key) != clicked["ts"]:
                 st.session_state[last_seen_key] = clicked["ts"]
-                st.session_state[f"corr_pending_target_{job.job_id}"] = int(clicked["idx"])
-                st.session_state[f"corr_pending_pan_{job.job_id}"] = False
+                click_idx = int(clicked["idx"])
+                action = clicked.get("action", "replace")
+                if action == "toggle":
+                    # Cmd/Ctrl+click: toggle del idx en el set canónico.
+                    # Si ya estaba dentro, sale; si no, entra. El ancla
+                    # last_key se actualiza al idx tocado, indique entrada
+                    # o salida (el patólogo acaba de tocar ahí).
+                    cur_set = list(st.session_state.get(idx_set_key, ()))
+                    if click_idx in cur_set:
+                        cur_set.remove(click_idx)
+                    else:
+                        cur_set.append(click_idx)
+                        cur_set.sort()
+                    st.session_state[idx_set_key] = tuple(cur_set)
+                    st.session_state[f"corr_idx_last_{job.job_id}"] = click_idx
+                    st.session_state[f"corr_pending_pan_{job.job_id}"] = False
+                else:
+                    # Click normal (replace): abandona cualquier lote
+                    # multi-select previo y vuelve a single-patch. Limpia
+                    # el set canónico, el text_input de rango y sus
+                    # errores; el number_input se actualiza vía
+                    # pending_target.
+                    st.session_state[idx_set_key] = ()
+                    st.session_state[f"corr_idx_last_{job.job_id}"] = None
+                    st.session_state[f"corr_pending_target_{job.job_id}"] = click_idx
+                    st.session_state[f"corr_pending_pan_{job.job_id}"] = False
+                    range_text_key = f"corr_idx_range_{job.job_id}"
+                    if range_text_key in st.session_state:
+                        st.session_state[range_text_key] = ""
+                    range_errors_key = f"corr_range_errors_{job.job_id}"
+                    if range_errors_key in st.session_state:
+                        st.session_state[range_errors_key] = []
                 st.rerun()
         st.caption(
             "Pan con arrastrar, zoom con rueda. Pasa el ratón sobre un "

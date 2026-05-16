@@ -240,13 +240,23 @@
       // de un drag de pan.
       div.addEventListener("click", function(ev) {
         ev.stopPropagation();
-        // panIfZoomed=false: si el patólogo ya hizo zoom, no movemos
-        // (está mirando ahí). Si NO hay zoom, igualmente aplicamos
-        // zoom 3x para destacar (lógica unificada en selectPatch).
-        selectPatch(o.idx, false);
-        console.log("[osd_viewer] div-click", o.idx);
+        // Fase 0 v4: Cmd (Mac) / Ctrl (resto) acumula. Click normal
+        // sustituye el set por el parche clicado (replace, comportamiento
+        // single-patch histórico). Cmd+click sobre un parche ya en el
+        // set lo elimina (toggle off); sobre un parche fuera, lo añade.
+        const isToggle = ev.metaKey || ev.ctrlKey;
+        const action = isToggle ? "toggle" : "replace";
+        // Solo aplicamos pan/zoom en replace: el toggle no quiere
+        // descentrar al patólogo que está construyendo un lote a mano.
+        if (!isToggle) {
+          // panIfZoomed=false: si el patólogo ya hizo zoom, no movemos
+          // (está mirando ahí). Si NO hay zoom, igualmente aplicamos
+          // zoom 3x para destacar (lógica unificada en selectPatch).
+          selectPatch(o.idx, false);
+        }
+        console.log("[osd_viewer] div-click", o.idx, "action:", action);
         sendStreamlit("streamlit:setComponentValue", {
-          value: { idx: o.idx, ts: Date.now() },
+          value: { idx: o.idx, ts: Date.now(), action: action },
           dataType: "json",
         });
       });
