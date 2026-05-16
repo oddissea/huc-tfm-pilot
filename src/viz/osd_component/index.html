@@ -14,6 +14,27 @@
     .osd-patch svg { display: block; width: 100%; height: 100%; pointer-events: none; }
     .osd-patch.osd-selected svg rect.sel-marker { display: block; }
     .osd-patch:not(.osd-selected) svg rect.sel-marker { display: none; }
+    /* Fase 0 v4 §4.2.3 — Lasso con Shift+drag. Overlay temporal que
+       dibuja el rectángulo de selección mientras el patólogo arrastra
+       manteniendo Shift. pointer-events:none para que no robe el
+       cursor durante el drag. z-index alto para verse por encima del
+       canvas de OSD y los overlays de los parches. */
+    #lasso-rect {
+      position: absolute;
+      pointer-events: none;
+      border: 2px dashed #ffd23a;
+      background: rgba(255, 210, 58, 0.12);
+      z-index: 9999;
+      display: none;
+      box-sizing: border-box;
+    }
+    /* Durante el lasso activo, suprimimos selección de texto para que
+       Shift+drag no dispare la selección de texto del browser que
+       genera highlight azul molesto. */
+    body.lasso-active, body.lasso-active * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
   </style>
   <script>
     /**
@@ -45,6 +66,7 @@
 </head>
 <body>
   <div id="viewer"></div>
+  <div id="lasso-rect"></div>
 
   <script src="openseadragon.min.js"></script>
   <script>
@@ -328,6 +350,165 @@
         loadTilesWithAjax: true,
         ajaxWithCredentials: true,
         maxZoomPixelRatio: 5,
+      });
+
+      // ─────────────────────────────────────────────────────────────
+      // Fase 0 v4 §4.2.3 — Lasso con Shift+drag
+      // ─────────────────────────────────────────────────────────────
+      // Cuando el patólogo mantiene Shift y arrastra, dibujamos un
+      // rectángulo translúcido amarillo sobre el visor y al soltar
+      // añadimos al set todos los parches cuyo bounding-box
+      // intersecta con el rectángulo (AABB intersect en coords de
+      // imagen DZI). Sin Shift, el drag panea el visor como hasta
+      // ahora — cero regresión.
+      //
+      // Modificadores:
+      //   - Shift+drag        → action="add"    (suma al lote)
+      //   - Shift+Alt+drag    → action="remove" (resta del lote)
+      //
+      // Capturamos en fase de captura (true) en pointerdown para
+      // ganarle al MouseTracker de OSD y poder hacer
+      // ev.stopPropagation()+ev.preventDefault() — así OSD no panea
+      // mientras el patólogo dibuja el lasso.
+      const viewerEl = viewer.element;
+      let lassoActive = false;
+      let lassoStart = null;
+      let lassoSubtract = false;
+      let lassoPointerId = null;
+      const LASSO_MIN_DRAG_PX = 4;  // Shift+click suelto se ignora
+
+      function lassoCancel() {
+        // Resetea estado y oculta el rect (compartido por pointerup,
+        // pointercancel y casos defensivos).
+        const rect = document.getElementById("lasso-rect");
+        if (rect) rect.style.display = "none";
+        if (lassoActive && lassoPointerId != null) {
+          try { viewerEl.releasePointerCapture(lassoPointerId); }
+          catch (e) { /* no captured */ }
+        }
+        document.body.classList.remove("lasso-active");
+        lassoActive = false;
+        lassoStart = null;
+        lassoPointerId = null;
+      }
+
+      viewerEl.addEventListener("pointerdown", function(ev) {
+        if (!ev.shiftKey) return;           // sin Shift, OSD recibe normal
+        ev.preventDefault();
+        ev.stopPropagation();
+        lassoActive = true;
+        lassoSubtract = ev.altKey;          // Shift+Alt → resta
+        lassoStart = { x: ev.clientX, y: ev.clientY };
+        lassoPointerId = ev.pointerId;
+        try { viewerEl.setPointerCapture(ev.pointerId); }
+        catch (e) { /* algunos browsers fallan en pointer types raros */ }
+        document.body.classList.add("lasso-active");
+        const rect = document.getElementById("lasso-rect");
+        rect.style.display = "block";
+        rect.style.left = ev.clientX + "px";
+        rect.style.top = ev.clientY + "px";
+        rect.style.width = "0px";
+        rect.style.height = "0px";
+      }, true);  // capture phase: gana a OSD
+
+      viewerEl.addEventListener("pointermove", function(ev) {
+        if (!lassoActive) return;
+        ev.preventDefault();
+        // rAF para no spam (60 fps máximo).
+        requestAnimationFrame(function() {
+          if (!lassoActive) return;
+          const rect = document.getElementById("lasso-rect");
+          if (!rect) return;
+          const x = Math.min(ev.clientX, lassoStart.x);
+          const y = Math.min(ev.clientY, lassoStart.y);
+          const w = Math.abs(ev.clientX - lassoStart.x);
+          const h = Math.abs(ev.clientY - lassoStart.y);
+          rect.style.left = x + "px";
+          rect.style.top = y + "px";
+          rect.style.width = w + "px";
+          rect.style.height = h + "px";
+        });
+      });
+
+      viewerEl.addEventListener("pointerup", function(ev) {
+        if (!lassoActive) return;
+        const startX = lassoStart.x;
+        const startY = lassoStart.y;
+        const endX = ev.clientX;
+        const endY = ev.clientY;
+        const w = Math.abs(endX - startX);
+        const h = Math.abs(endY - startY);
+        const subtract = lassoSubtract;
+        // Reset state ANTES de procesar (por si algo falla, queda limpio).
+        lassoCancel();
+
+        if (w < LASSO_MIN_DRAG_PX || h < LASSO_MIN_DRAG_PX) {
+          // Shift+click suelto (sin drag real): no hacer nada. Tampoco
+          // queremos que se interprete como replace o toggle — el
+          // patólogo intentaba un lasso, no clickear.
+          console.log("[osd_viewer] lasso ignorado (drag < " + LASSO_MIN_DRAG_PX + "px)");
+          return;
+        }
+
+        // Convertir bbox del browser → coords de imagen del DZI.
+        // El bounding rect del viewerEl nos da el offset relativo al
+        // viewport del browser; restamos para obtener coords locales
+        // al viewer, que es lo que viewerElementToImageCoordinates
+        // espera.
+        const bcr = viewerEl.getBoundingClientRect();
+        const minX = Math.min(startX, endX) - bcr.left;
+        const minY = Math.min(startY, endY) - bcr.top;
+        const maxX = Math.max(startX, endX) - bcr.left;
+        const maxY = Math.max(startY, endY) - bcr.top;
+        let tl, br;
+        try {
+          tl = viewer.viewport.viewerElementToImageCoordinates(
+            new OpenSeadragon.Point(minX, minY)
+          );
+          br = viewer.viewport.viewerElementToImageCoordinates(
+            new OpenSeadragon.Point(maxX, maxY)
+          );
+        } catch (e) {
+          console.warn("[osd_viewer] lasso coord conversion failed:", e);
+          return;
+        }
+
+        // AABB intersect contra cada parche (lineal, ~10 ms para
+        // 3.000 parches sin problema).
+        const hit = [];
+        for (const o of overlaysData) {
+          if (o.x + o.size < tl.x || o.x > br.x) continue;
+          if (o.y + o.size < tl.y || o.y > br.y) continue;
+          hit.push(o.idx);
+        }
+        if (hit.length === 0) {
+          console.log("[osd_viewer] lasso vacío (sin parches intersectados)");
+          return;
+        }
+
+        const action = subtract ? "remove" : "add";
+        console.log("[osd_viewer] lasso", action, hit.length, "parches:", hit);
+        // Enviar el set explícito a Python (no es idx single como en
+        // click). El dispatcher de Python detecta el campo `set` y
+        // aplica la operación add/remove sobre idx_set_key.
+        sendStreamlit("streamlit:setComponentValue", {
+          value: {
+            set: hit,
+            last: hit[hit.length - 1],
+            action: action,
+            ts: Date.now()
+          },
+          dataType: "json",
+        });
+      });
+
+      // pointercancel: el browser canceló el gesto (p. ej. el cursor
+      // salió del documento, otro pointer interfirió, etc.). Limpieza
+      // sin enviar nada.
+      viewerEl.addEventListener("pointercancel", function(ev) {
+        if (!lassoActive) return;
+        console.log("[osd_viewer] lasso pointercancel");
+        lassoCancel();
       });
 
       viewer.addHandler("open", function() {

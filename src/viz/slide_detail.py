@@ -2341,8 +2341,40 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             last_seen_key = f"corr_last_click_ts_{job.job_id}"
             if st.session_state.get(last_seen_key) != clicked["ts"]:
                 st.session_state[last_seen_key] = clicked["ts"]
-                click_idx = int(clicked["idx"])
                 action = clicked.get("action", "replace")
+                # Lasso (§4.2.3): el payload trae `set` (lista de idx)
+                # en lugar de `idx` single. Procesamos add/remove sobre
+                # el set canónico antes de los branches de click clásico.
+                if action in ("add", "remove") and isinstance(clicked.get("set"), list):
+                    incoming = [int(i) for i in clicked["set"]]
+                    cur_set = set(st.session_state.get(idx_set_key, ()))
+                    if action == "add":
+                        cur_set.update(incoming)
+                    else:
+                        cur_set.difference_update(incoming)
+                    new_set = tuple(sorted(cur_set))
+                    st.session_state[idx_set_key] = new_set
+                    # Ancla: el último idx del lasso (que era el patch
+                    # justo bajo el cursor al soltar). Si el set quedó
+                    # vacío (Shift+Alt sobre un lote ya removido), no
+                    # hay ancla.
+                    last_idx_payload = clicked.get("last")
+                    if new_set:
+                        new_last = (
+                            int(last_idx_payload)
+                            if last_idx_payload is not None and int(last_idx_payload) in new_set
+                            else new_set[-1]
+                        )
+                        st.session_state[f"corr_idx_last_{job.job_id}"] = new_last
+                        st.session_state[pending_key] = new_last
+                    else:
+                        st.session_state[f"corr_idx_last_{job.job_id}"] = None
+                        st.session_state[pending_key] = None
+                    st.session_state[f"corr_pending_pan_{job.job_id}"] = False
+                    st.rerun()
+                # Si llegamos aquí, no es lasso: es click clásico (replace
+                # o toggle), que viene con `idx` single en el payload.
+                click_idx = int(clicked["idx"])
                 if action == "toggle":
                     # Cmd/Ctrl+click: toggle del idx en el set canónico.
                     # Si ya estaba dentro, sale; si no, entra. El ancla
