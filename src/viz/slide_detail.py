@@ -1596,12 +1596,29 @@ def _render_corrections_panel(
         st.session_state.setdefault(idx_set_key, ())
         st.session_state.setdefault(idx_last_key, None)
 
+        # Guardas idempotentes para los callbacks de los inputs. Streamlit
+        # en algunos escenarios dispara on_change incluso para cambios
+        # programáticos del session_state (p. ej. cuando el dispatcher
+        # del visor actualiza widget_key vía pending_key). Sin esta
+        # protección, _on_idx_typed o _on_range_typed se ejecutarían
+        # tras cada Cmd+click reseteando el set canónico al valor del
+        # input — provocando el bug "remove current + add previous".
+        last_typed_idx_key = f"_corr_last_typed_idx_{job.job_id}"
+        last_parsed_range_key = f"_corr_last_parsed_range_raw_{job.job_id}"
+        _UNSET = object()
+
         def _on_idx_typed() -> None:
             # Cuando el patólogo teclea un #idx + Enter, el flujo es
             # navegación explícita (igual que el botón siguiente): el
             # visor debe centrar y zoomear ese parche, no solo
             # marcarlo en amarillo silenciosamente fuera del viewport.
             raw = st.session_state.get(widget_key)
+            # Idempotencia: si el raw no cambió respecto al último que
+            # procesamos, esto es una llamada espuria de Streamlit; no
+            # tocar el estado canónico.
+            if st.session_state.get(last_typed_idx_key, _UNSET) == raw:
+                return
+            st.session_state[last_typed_idx_key] = raw
             if raw is None:
                 # number_input limpiado: vaciar el set canónico también.
                 st.session_state[idx_set_key] = ()
@@ -1619,6 +1636,11 @@ def _render_corrections_panel(
 
         def _on_range_typed() -> None:
             raw = (st.session_state.get(range_text_key) or "").strip()
+            # Idempotencia: si el raw no cambió respecto al último parseo,
+            # esto es una llamada espuria; no tocar el set canónico.
+            if st.session_state.get(last_parsed_range_key, _UNSET) == raw:
+                return
+            st.session_state[last_parsed_range_key] = raw
             if not raw:
                 # El patólogo limpió el text_input. No tocamos el
                 # number_input ni el set canónico — si tenía un valor
