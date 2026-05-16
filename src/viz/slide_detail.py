@@ -1743,6 +1743,12 @@ def _render_corrections_panel(
                 # pending_pan=True para que el visor navegue al destino.
                 st.session_state[pending_key] = next_uncertain
                 st.session_state[f"corr_pending_pan_{job.job_id}"] = True
+                # Sincronizar el set canónico con el nuevo ancla
+                # (set = (next_uncertain,), last = next_uncertain). Sin
+                # esto, un lote previo seguía vivo en el set y el visor
+                # mantenía los highlights amarillos viejos al saltar.
+                st.session_state[idx_set_key] = (next_uncertain,)
+                st.session_state[idx_last_key] = next_uncertain
                 # Al saltar a un parche nuevo, deseleccionamos la
                 # etiqueta y vaciamos el comentario para forzar al
                 # patólogo a tomar una decisión consciente sobre el
@@ -2346,12 +2352,14 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                     st.session_state[f"corr_pending_pan_{job.job_id}"] = False
                 else:
                     # Click normal (replace): abandona cualquier lote
-                    # multi-select previo y vuelve a single-patch. Limpia
-                    # el set canónico, el text_input de rango y sus
-                    # errores; el number_input se actualiza vía
-                    # pending_target.
-                    st.session_state[idx_set_key] = ()
-                    st.session_state[f"corr_idx_last_{job.job_id}"] = None
+                    # multi-select previo y arranca uno nuevo con SOLO
+                    # este parche. El set canónico queda en (click_idx,)
+                    # —no vaciamos: es coherente con _on_idx_typed y
+                    # _on_range_typed que también REEMPLAZAN el set con
+                    # el nuevo valor, dejando que el Cmd+click siguiente
+                    # añada/quite a partir de él.
+                    st.session_state[idx_set_key] = (click_idx,)
+                    st.session_state[f"corr_idx_last_{job.job_id}"] = click_idx
                     st.session_state[f"corr_pending_target_{job.job_id}"] = click_idx
                     st.session_state[f"corr_pending_pan_{job.job_id}"] = False
                     range_text_key = f"corr_idx_range_{job.job_id}"
