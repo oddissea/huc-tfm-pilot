@@ -68,6 +68,26 @@
     // onRender. Todos los miembros del set reciben el highlight
     // amarillo en applyToggles, no solo el ancla.
     let selectedIdxSet = new Set();
+    // Fase 0 v4: dedupe de clicks. Ambos handlers (div.click y
+    // viewer.canvas-click) pueden disparar para el mismo click físico
+    // — el div tiene pointer-events:auto y atrapa el evento DOM
+    // directamente, pero la MouseTracker de OSD también puede emitir
+    // su propio canvas-click sobre el viewer. Y peor: en canvas-click,
+    // event.originalEvent.metaKey no siempre llega correctamente, así
+    // que el segundo handler puede interpretar Cmd+click como replace
+    // con un idx vecino (findPatchAtImageCoords resuelve por coords).
+    // Resultado: combinaciones tipo replace(12)+toggle(11) → set (11,12).
+    // Suprimimos cualquier click adicional en una ventana corta.
+    let lastProcessedClickTs = 0;
+    const CLICK_DEDUP_WINDOW_MS = 200;
+    function shouldProcessClick() {
+      const now = Date.now();
+      if (now - lastProcessedClickTs < CLICK_DEDUP_WINDOW_MS) {
+        return false;
+      }
+      lastProcessedClickTs = now;
+      return true;
+    }
     let overlaysData = [];
     let viewCorrected = false;
     const strokeRects = new Map();
@@ -240,6 +260,14 @@
       // de un drag de pan.
       div.addEventListener("click", function(ev) {
         ev.stopPropagation();
+        // Dedupe contra el canvas-click fallback de OSD que puede
+        // disparar el mismo click físico con peor info (idx vecino +
+        // metaKey perdido) y producir sets aleatorios. Ver
+        // shouldProcessClick().
+        if (!shouldProcessClick()) {
+          console.log("[osd_viewer] div-click deduped");
+          return;
+        }
         // Fase 0 v4: Cmd (Mac) / Ctrl (resto) acumula. Click normal
         // sustituye el set por el parche clicado (replace, comportamiento
         // single-patch histórico). Cmd+click sobre un parche ya en el
@@ -378,6 +406,12 @@
         const imgPos = viewer.viewport.viewportToImageCoordinates(viewportPos);
         const idx = findPatchAtImageCoords(imgPos.x, imgPos.y);
         if (idx == null) return;
+        // Dedupe contra el div.click handler (que ya procesa el mismo
+        // click con info más fiable). Ver shouldProcessClick() arriba.
+        if (!shouldProcessClick()) {
+          console.log("[osd_viewer] canvas-click deduped");
+          return;
+        }
         // Misma lógica de modificador que el div click handler (v4):
         // Cmd / Ctrl en el evento subyacente → action="toggle". OSD
         // expone event.originalEvent (MouseEvent del browser); de ahí
