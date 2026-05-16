@@ -625,7 +625,22 @@
           if (panToSelected) {
             // Navegación explícita (botón siguiente o number_input/range
             // typed + Enter, ambos pre-setean pending_pan=True en Python).
-            selectPatch(externallySelected, panToSelected);
+            // Diferenciamos por tamaño del set:
+            //   - Lote (>1): volver a vista panorámica (goHome) para que
+            //     el patólogo vea TODAS las celdas seleccionadas a la vez.
+            //     Hacer zoom 3x al ancla escondería los demás miembros.
+            //   - Single (1 elemento): zoom 3x al ancla, comportamiento
+            //     histórico para revisar el parche en detalle.
+            if (selectedIdxSet.size > 1) {
+              try {
+                viewer.viewport.goHome(true);
+              } catch (e) {
+                console.warn("[osd_viewer] goHome failed:", e);
+              }
+              selectedIdx = externallySelected;
+            } else {
+              selectPatch(externallySelected, panToSelected);
+            }
           } else {
             // Eco de click directo (replace) o de Cmd+click (toggle):
             // sincronizamos el ancla interna sin mover la vista. El
