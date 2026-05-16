@@ -1547,11 +1547,42 @@ def _render_corrections_panel(
         # early-return → reescribo number_input".
         label_key_widget = f"corr_label_{job.job_id}"
         label_key_persist = f"corr_label_persist_{job.job_id}"
+        comment_key = f"corr_comment_{job.job_id}"
         if (
             label_key_widget in st.session_state
             and st.session_state[label_key_widget] is not None
         ):
             st.session_state[label_key_persist] = st.session_state[label_key_widget]
+
+        # Patrón "pending clear" para el reset del form tras guardar:
+        # Streamlit prohíbe modificar la session_state de un widget tras
+        # haberse instanciado en el mismo rerun (StreamlitAPIException).
+        # En su lugar, el handler del save button solo activa el flag
+        # `pending_clear` + escribe el mensaje de éxito, y aquí
+        # —al principio del siguiente rerun, ANTES de instanciar los
+        # widgets de input— consumimos el flag y limpiamos.
+        pending_clear_key = f"_corr_pending_clear_{job.job_id}"
+        pending_success_key = f"_corr_save_success_{job.job_id}"
+        if st.session_state.get(pending_clear_key, False):
+            # Mostrar mensaje de éxito del guardado anterior.
+            success_msg = st.session_state.pop(pending_success_key, None)
+            if success_msg:
+                st.success(success_msg)
+            # Limpiar state canónico.
+            st.session_state[idx_set_key] = ()
+            st.session_state[idx_last_key] = None
+            st.session_state[range_errors_key] = []
+            # Limpiar widgets (excepto el number_input: conserva ancla).
+            if range_text_key in st.session_state:
+                st.session_state[range_text_key] = ""
+            if label_key_widget in st.session_state:
+                st.session_state[label_key_widget] = None
+            if label_key_persist in st.session_state:
+                st.session_state[label_key_persist] = None
+            if comment_key in st.session_state:
+                st.session_state[comment_key] = ""
+            # Consumir el flag.
+            del st.session_state[pending_clear_key]
         # NOTA: la aplicación pending_key → widget_key se hace en
         # render_slide_detail (antes del visor) para evitar
         # desincronización visor↔combo. Aquí solo escribimos en
@@ -1902,41 +1933,25 @@ def _render_corrections_panel(
                         model_version=_model_version(),
                         comment=comment or "",
                     )
+                # Activamos el flag de "pending clear" y guardamos el
+                # mensaje de éxito. El limpiado de widgets ocurre al
+                # inicio del próximo rerun, ANTES de instanciar los
+                # widgets (única ventana permitida por Streamlit). No
+                # podemos modificar aquí widget_key/range_text_key/
+                # label_key_widget/comment_key directamente porque ya
+                # están instanciados en este rerun.
                 if len(save_idxs) <= 1:
-                    st.success(
-                        f"Corrección guardada: parche #{save_idxs[0]} → {new_label}"
+                    msg = (
+                        f"Corrección guardada: parche #{save_idxs[0]} → "
+                        f"{new_label}"
                     )
                 else:
-                    st.success(
-                        f"Correcciones guardadas: {len(save_idxs)} parches → {new_label}"
+                    msg = (
+                        f"Correcciones guardadas: {len(save_idxs)} parches "
+                        f"→ {new_label}"
                     )
-                # Reset del form tras guardar: vaciamos el set canónico,
-                # el text_input de rango, los errores del parser, la
-                # etiqueta (widget + persist) y el campo de comentario.
-                # Mantenemos el number_input con su ancla por dos
-                # razones: (1) no disparar el early-return que purgaría
-                # widgets (aunque el double-key de la etiqueta lo
-                # mitiga, evitarlo es más limpio); (2) el patólogo
-                # suele querer ver dónde se quedó el último parche
-                # corregido para retomar desde ahí o pulsar
-                # "Siguiente más incierto".
-                #
-                # Al limpiar la etiqueta forzamos al patólogo a re-
-                # seleccionar la clase para el próximo guardado: evita
-                # que un click distraído sobre Guardar registre una
-                # corrección con la etiqueta del parche anterior.
-                st.session_state[idx_set_key] = ()
-                st.session_state[idx_last_key] = None
-                if range_text_key in st.session_state:
-                    st.session_state[range_text_key] = ""
-                st.session_state[range_errors_key] = []
-                if label_key_widget in st.session_state:
-                    st.session_state[label_key_widget] = None
-                if label_key_persist in st.session_state:
-                    st.session_state[label_key_persist] = None
-                comment_key = f"corr_comment_{job.job_id}"
-                if comment_key in st.session_state:
-                    st.session_state[comment_key] = ""
+                st.session_state[pending_success_key] = msg
+                st.session_state[pending_clear_key] = True
                 st.rerun()
         with col_info:
             if range_errors_active:
