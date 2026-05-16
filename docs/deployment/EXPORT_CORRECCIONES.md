@@ -34,6 +34,69 @@ blob remoto.
   se invoca vía `docker compose exec`. No hace falta pasar
   `--queue-dir` explícitamente.
 
+## Migración de permisos GCP pre-deploy (¡no saltarse!)
+
+Durante QA, el rol `roles/storage.objectUser` sobre el bucket lo
+tiene el Service Account de la **VM de Google Cloud** que usa el
+alumno para pruebas:
+
+```
+622373334442-compute@developer.gserviceaccount.com
+```
+
+Al desplegar en el ordenador del HUC ese SA ya no debe poder
+escribir en el bucket (principio de mínimo privilegio). Hay que:
+
+1. **Identificar el SA del HUC.** Si el ordenador del HUC usa
+   Application Default Credentials vía
+   `gcloud auth application-default login`, el "principal" será una
+   cuenta de usuario (`user:huc-operator@...`). Si en su lugar se
+   crea una SA dedicada (recomendado), apunta su email aquí:
+
+   ```bash
+   # Crear SA dedicada para el host HUC (opción recomendada)
+   gcloud iam service-accounts create huc-tfm-pilot-host \
+     --display-name="HUC TFM Pilot — host del HUC"
+
+   # Generar key JSON y guardarla en el host HUC en una ruta segura
+   gcloud iam service-accounts keys create ~/huc-tfm-pilot-host.json \
+     --iam-account=huc-tfm-pilot-host@PROJECT_ID.iam.gserviceaccount.com
+   ```
+
+2. **Conceder permiso al SA del HUC** sobre el bucket:
+
+   ```bash
+   gcloud storage buckets add-iam-policy-binding \
+     gs://huc-tfm-pilot-corrections \
+     --member="serviceAccount:huc-tfm-pilot-host@PROJECT_ID.iam.gserviceaccount.com" \
+     --role="roles/storage.objectUser"
+   ```
+
+3. **Revocar el permiso al SA de la VM de QA**:
+
+   ```bash
+   gcloud storage buckets remove-iam-policy-binding \
+     gs://huc-tfm-pilot-corrections \
+     --member="serviceAccount:622373334442-compute@developer.gserviceaccount.com" \
+     --role="roles/storage.objectUser"
+   ```
+
+4. **Verificar la política final** (debe aparecer solo el SA del
+   HUC en `objectUser`):
+
+   ```bash
+   gcloud storage buckets get-iam-policy gs://huc-tfm-pilot-corrections
+   ```
+
+5. **Probar desde el host HUC** que la subida funciona con la nueva
+   identidad antes de borrar la VM de QA:
+
+   ```bash
+   docker compose exec app python -m scripts.export_corrections --dry-run --verbose
+   ```
+
+   Debería resolver el bucket sin errores de auth.
+
 ## Limpieza pre-deploy (¡no saltarse!)
 
 Durante el desarrollo y QA, el bucket
