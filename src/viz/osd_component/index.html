@@ -245,21 +245,16 @@
         // single-patch histórico). Cmd+click sobre un parche ya en el
         // set lo elimina (toggle off); sobre un parche fuera, lo añade.
         const isToggle = ev.metaKey || ev.ctrlKey;
-        const isShift = ev.shiftKey;
         const action = isToggle ? "toggle" : "replace";
-        // Pan/zoom solo en click normal (sin Cmd y sin Shift):
-        //   - Cmd: el patólogo está construyendo un lote a mano, mover
-        //     la vista lo descentraría.
-        //   - Shift: reservado para lasso (§4.2.3) — un click suelto con
-        //     Shift no debe alterar la vista, así no chocamos con el
-        //     gesto de drag que vendrá después.
-        if (!isToggle && !isShift) {
+        // Pan/zoom solo en click normal (sin Cmd): el patólogo está
+        // construyendo un lote a mano y mover la vista lo descentraría.
+        if (!isToggle) {
           // panIfZoomed=false: si el patólogo ya hizo zoom, no movemos
           // (está mirando ahí). Si NO hay zoom, igualmente aplicamos
           // zoom 3x para destacar (lógica unificada en selectPatch).
           selectPatch(o.idx, false);
         }
-        console.log("[osd_viewer] div-click", o.idx, "action:", action, "shift:", isShift);
+        console.log("[osd_viewer] div-click", o.idx, "action:", action);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: o.idx, ts: Date.now(), action: action },
           dataType: "json",
@@ -384,17 +379,16 @@
         const idx = findPatchAtImageCoords(imgPos.x, imgPos.y);
         if (idx == null) return;
         // Misma lógica de modificador que el div click handler (v4):
-        // Cmd / Ctrl → action="toggle"; Shift desactiva pan/zoom para
-        // no chocar con el lasso §4.2.3. OSD expone event.originalEvent
-        // (MouseEvent del browser); de ahí sacamos modifiers con seguridad.
+        // Cmd / Ctrl en el evento subyacente → action="toggle". OSD
+        // expone event.originalEvent (MouseEvent del browser); de ahí
+        // sacamos metaKey/ctrlKey con seguridad.
         const orig = event.originalEvent;
         const isToggle = !!(orig && (orig.metaKey || orig.ctrlKey));
-        const isShift = !!(orig && orig.shiftKey);
         const action = isToggle ? "toggle" : "replace";
-        if (!isToggle && !isShift) {
+        if (!isToggle) {
           selectPatch(idx, false);
         }
-        console.log("[osd_viewer] canvas-click fallback", idx, "action:", action, "shift:", isShift);
+        console.log("[osd_viewer] canvas-click fallback", idx, "action:", action);
         sendStreamlit("streamlit:setComponentValue", {
           value: { idx: idx, ts: Date.now(), action: action },
           dataType: "json",
@@ -616,16 +610,30 @@
       }
       // Selección que viene del parent (panel de correcciones): si
       // pan_to_selected=true, navegamos al parche (botón siguiente,
-      // number_input). Si false, solo marcamos amarillo (cuando es eco
-      // de un click capturado: el patólogo ya está allí mirando).
+      // number_input). Si false, NO hay que llamar a selectPatch —
+      // selectPatch en vista panorámica fuerza un zoom 3x aunque el
+      // caller diga panIfZoomed=false (ver función), y eso provocaba
+      // que un Cmd+click toggle en panorámica zoomase a pesar de
+      // todo. La pertenencia al set canónico la pinta applyToggles
+      // de forma independiente, así que evitar selectPatch aquí es
+      // correcto: el visor permanece quieto y los amarillos se
+      // refrescan vía args.selected_idx_set.
       const externallySelected = args.selected_idx;
       const panToSelected = args.pan_to_selected === true;
       if (externallySelected != null) {
         if (initialized && patchDivs.size > 0) {
-          // panIfZoomed se mapea a pan_to_selected: el botón siguiente
-          // y los cambios del number_input vienen con true (navegación
-          // explícita); el eco del click capturado viene con false.
-          selectPatch(externallySelected, panToSelected);
+          if (panToSelected) {
+            // Navegación explícita (botón siguiente o number_input/range
+            // typed + Enter, ambos pre-setean pending_pan=True en Python).
+            selectPatch(externallySelected, panToSelected);
+          } else {
+            // Eco de click directo (replace) o de Cmd+click (toggle):
+            // sincronizamos el ancla interna sin mover la vista. El
+            // highlight visual lo dirige el set canónico vía
+            // applyToggles, así que basta con actualizar selectedIdx
+            // para que futuras navegaciones partan del idx correcto.
+            selectedIdx = externallySelected;
+          }
         } else {
           window.__pendingSelected = externallySelected;
         }
