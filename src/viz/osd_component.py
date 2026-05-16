@@ -27,6 +27,7 @@ def osd_viewer(
     show_predictions: bool = True,
     show_attention: bool = False,
     selected_idx: int | None = None,
+    selected_idx_set: list[int] | None = None,
     view_corrected: bool = False,
     show_selected_borders: bool = True,
     pan_to_selected: bool = False,
@@ -54,7 +55,16 @@ def osd_viewer(
         selected_idx: si se pasa, marca ese parche con el highlight amarillo
                       de selección al renderizar (sincroniza estado externo
                       con el visor — p. ej. el selectbox del panel de
-                      correcciones).
+                      correcciones). Funciona como **ancla**: el visor
+                      panea/zoomea a este idx cuando ``pan_to_selected``
+                      está activo.
+        selected_idx_set: lista de idx adicionales a destacar como
+                          seleccionados (Fase 0 v4 multi-select). Se
+                          pintan con el mismo highlight amarillo que
+                          ``selected_idx``; la diferencia es solo
+                          conceptual (el ancla es el target de pan/zoom).
+                          Si None o lista vacía, solo se destaca
+                          ``selected_idx``.
         key: identificador único entre instancias del componente.
 
     Returns:
@@ -69,6 +79,7 @@ def osd_viewer(
         show_predictions=show_predictions,
         show_attention=show_attention,
         selected_idx=selected_idx,
+        selected_idx_set=selected_idx_set,
         view_corrected=view_corrected,
         show_selected_borders=show_selected_borders,
         pan_to_selected=pan_to_selected,

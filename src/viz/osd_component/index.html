@@ -63,6 +63,11 @@
     let viewer = null;
     let initialized = false;
     let selectedIdx = null;
+    // Fase 0 v4: set de parches seleccionados además del ancla
+    // (selectedIdx). Se rellena desde args.selected_idx_set en cada
+    // onRender. Todos los miembros del set reciben el highlight
+    // amarillo en applyToggles, no solo el ancla.
+    let selectedIdxSet = new Set();
     let overlaysData = [];
     let viewCorrected = false;
     const strokeRects = new Map();
@@ -434,8 +439,25 @@
       viewCorrected = args.view_corrected === true;
       const NONTERNARY_LABELS = new Set(["HIP", "ART", "EXCLUDED"]);
 
+      // Sync del set canónico de selección desde Python. Aceptamos array
+      // (caso normal), null/undefined (sin set, solo ancla single) o
+      // un array vacío. Rehacemos el Set en cada render para reflejar
+      // el estado actual sin mezclar con renders anteriores.
+      if (Array.isArray(args.selected_idx_set)) {
+        selectedIdxSet = new Set(args.selected_idx_set);
+      } else if (args.selected_idx_set === null || args.selected_idx_set === undefined) {
+        selectedIdxSet = new Set();
+      }
+
       for (const o of overlaysData) {
-        const isSelected = (selectedIdx != null && o.idx === selectedIdx);
+        // Fase 0 v4: el highlight amarillo aplica tanto al ancla
+        // (selectedIdx single) como a cualquier miembro del set
+        // multi-select (selectedIdxSet). Visualmente son idénticos:
+        // la distinción ancla vs lote es solo conceptual, y el ancla
+        // queda implícita al ser el target del pan/zoom.
+        const isAnchor = (selectedIdx != null && o.idx === selectedIdx);
+        const isInSet = selectedIdxSet.has(o.idx);
+        const isSelected = isAnchor || isInSet;
         // Para el parche seleccionado, ocultar tanto strokeRect (borde
         // de etiqueta) como selRect (borde amarillo) si el patólogo
         // pidió 'bordes off' — para examinar el parche limpio.

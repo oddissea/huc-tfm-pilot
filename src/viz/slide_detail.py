@@ -465,6 +465,7 @@ def _render_openseadragon_viewer(
     dzi_offset: tuple[int, int] = (0, 0),
     height: int = 620,
     selected_idx: int | None = None,
+    selected_idx_set: list[int] | None = None,
     view_corrected: bool = False,
     show_selected_borders: bool = True,
     pan_to_selected: bool = False,
@@ -600,6 +601,7 @@ def _render_openseadragon_viewer(
             show_predictions=show_predictions,
             show_attention=show_attention,
             selected_idx=selected_idx,
+            selected_idx_set=selected_idx_set,
             view_corrected=view_corrected,
             show_selected_borders=show_selected_borders,
             pan_to_selected=pan_to_selected,
@@ -2237,6 +2239,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
         # toggle 'ver correcciones aplicadas' para repintar bordes con
         # el color de la corrección.
         sel_idx = None
+        sel_idx_set: list[int] | None = None
         view_corrected_flag = False
         show_sel_borders_flag = True
         pan_to_selected_flag = False
@@ -2245,6 +2248,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             widget_key = f"corr_idx_{job.job_id}"
             pending_key = f"corr_pending_target_{job.job_id}"
             pending_pan_key = f"corr_pending_pan_{job.job_id}"
+            idx_set_key = f"corr_idx_set_{job.job_id}"
             # CRÍTICO: aplicar pending_key ANTES de renderizar el visor.
             # El botón 'siguiente más incierto' encola en pending_key
             # (con pending_pan=True para que el visor panee al destino).
@@ -2263,6 +2267,12 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                 v = st.session_state[widget_key]
                 if v is not None:
                     sel_idx = int(v)
+            # Fase 0 v4: set canónico de parches seleccionados (lote
+            # multi-select por rango/lasso). El visor pinta amarillo
+            # todos los del set además del ancla single (sel_idx).
+            idx_set_state = st.session_state.get(idx_set_key, ())
+            if idx_set_state:
+                sel_idx_set = [int(i) for i in idx_set_state]
             view_corrected_flag = bool(
                 st.session_state.get(f"view_corrected_{job.job_id}", False)
             )
@@ -2287,6 +2297,7 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
             show_attention=show_att,
             dzi_offset=osd_offset,
             selected_idx=sel_idx,
+            selected_idx_set=sel_idx_set,
             view_corrected=view_corrected_flag,
             show_selected_borders=show_sel_borders_flag,
             pan_to_selected=pan_to_selected_flag,
