@@ -1537,6 +1537,21 @@ def _render_corrections_panel(
         pending_action_key = f"corr_pending_action_{job.job_id}"
         pending_pan_key = f"corr_pending_pan_{job.job_id}"
         range_errors_key = f"corr_range_errors_{job.job_id}"
+        # Patrón "double-key" para la segmented_control de etiqueta: el
+        # widget puede ser purgado por Streamlit cuando la función hace
+        # early-return (sin parche seleccionado) y por tanto no lo
+        # renderiza. Guardamos el valor en una key persistente paralela
+        # para usarla como `default=` cuando el widget vuelva a
+        # instanciarse, garantizando que la etiqueta seleccionada
+        # sobreviva al ciclo "limpio number_input → patch_idx=None →
+        # early-return → reescribo number_input".
+        label_key_widget = f"corr_label_{job.job_id}"
+        label_key_persist = f"corr_label_persist_{job.job_id}"
+        if (
+            label_key_widget in st.session_state
+            and st.session_state[label_key_widget] is not None
+        ):
+            st.session_state[label_key_persist] = st.session_state[label_key_widget]
         # NOTA: la aplicación pending_key → widget_key se hace en
         # render_slide_detail (antes del visor) para evitar
         # desincronización visor↔combo. Aquí solo escribimos en
@@ -1581,17 +1596,17 @@ def _render_corrections_panel(
             st.session_state[range_errors_key] = errors
             if not parsed:
                 # Input totalmente inválido (cero tokens utilizables).
-                # Vaciamos el set canónico (no hay lote aplicable) pero
-                # NO tocamos el number_input. Por qué: si limpiásemos
-                # widget_key, patch_idx pasaría a None y la función
-                # haría early-return antes de renderizar la
-                # segmented_control, lo que provoca que Streamlit purgue
-                # el estado del widget y la etiqueta arranque en None
-                # al volver a tener parche. La protección contra "save
-                # accidental sobre el #idx stale" la añadimos en el
-                # disabled del save button (range_errors_active).
+                # Limpiamos el estado canónico y el number_input para
+                # que el patólogo no se confunda con un valor stale
+                # del #idx anterior y guarde por accidente sobre él.
+                # La purga del segmented_control de etiqueta (que
+                # provoca el early-return cuando patch_idx=None) está
+                # mitigada por el patrón double-key (label_key_persist)
+                # definido al inicio de _render_corrections_panel.
                 st.session_state[idx_set_key] = ()
                 st.session_state[idx_last_key] = None
+                if widget_key in st.session_state:
+                    st.session_state[widget_key] = None
                 return
             st.session_state[idx_set_key] = parsed
             st.session_state[idx_last_key] = parsed[-1]
@@ -1767,11 +1782,14 @@ def _render_corrections_panel(
             caption_text += f"\n\n✓ **Corregido a {existing_corr}**"
         st.caption(caption_text)
 
-        # Selector de clase. segmented_control para que sea un click directo.
+        # Selector de clase. segmented_control para que sea un click
+        # directo. `default=` rescata el valor de label_key_persist si
+        # el widget fue purgado en un rerun anterior (ver double-key).
         new_label = st.segmented_control(
             "Etiqueta corregida",
             options=list(CORRECTION_LABELS),
-            key=f"corr_label_{job.job_id}",
+            key=label_key_widget,
+            default=st.session_state.get(label_key_persist),
         )
 
         # Coloreado de los botones por contenido de texto. Streamlit no
