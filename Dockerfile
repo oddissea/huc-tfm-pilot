@@ -30,6 +30,11 @@ COPY assets/ ./assets/
 # App entry point.
 COPY app.py .
 
+# CLI scripts (export_corrections, etc.). Permite invocar
+# `docker compose exec app python -m scripts.export_corrections` desde
+# cron en el host de producción (red de seguridad del hook del worker).
+COPY scripts/ ./scripts/
+
 EXPOSE 8501
 
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
