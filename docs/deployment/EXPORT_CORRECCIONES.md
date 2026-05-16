@@ -29,6 +29,10 @@ blob remoto.
   `roles/storage.objectUser` sobre `huc-tfm-pilot-corrections`.
 - `google-cloud-storage` ya está en `requirements.txt` del
   container; no hace falta nada en el host.
+- `docker-compose.yml` ya inyecta `PILOT_QUEUE_DIR=/tmp/queue` en el
+  container, así que el CLI localiza la cola automáticamente cuando
+  se invoca vía `docker compose exec`. No hace falta pasar
+  `--queue-dir` explícitamente.
 
 ## Setup del cron en HUC
 
