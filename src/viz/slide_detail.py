@@ -2327,7 +2327,22 @@ def render_slide_detail(job: "Job", top_k: int = 5) -> None:
                         cur_set.append(click_idx)
                         cur_set.sort()
                     st.session_state[idx_set_key] = tuple(cur_set)
-                    st.session_state[f"corr_idx_last_{job.job_id}"] = click_idx
+                    # Sincronizar el number_input con el ancla del set.
+                    # Sin esto, el widget_key conservaba su valor previo
+                    # (p. ej. de un click replace anterior) y la UI mostraba
+                    # caption #30 con number_input=16 al mismo tiempo.
+                    # Usamos pending_key (consumed en el visor dispatcher al
+                    # principio del siguiente rerun) para evitar mutar el
+                    # widget tras haberse instanciado.
+                    if cur_set:
+                        st.session_state[f"corr_idx_last_{job.job_id}"] = click_idx
+                        st.session_state[pending_key] = click_idx
+                    else:
+                        # Toggle-off del único miembro: el set queda vacío.
+                        # Limpiamos también widget_key y last para que la
+                        # UI vuelva al estado "sin parche seleccionado".
+                        st.session_state[f"corr_idx_last_{job.job_id}"] = None
+                        st.session_state[pending_key] = None
                     st.session_state[f"corr_pending_pan_{job.job_id}"] = False
                 else:
                     # Click normal (replace): abandona cualquier lote
