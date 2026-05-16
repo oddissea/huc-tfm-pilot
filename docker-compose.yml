@@ -5,6 +5,11 @@ services:
     container_name: huc-pilot-app
     expose:
       - "8501"
+    environment:
+      # Path de la cola dentro del container — usado por
+      # scripts/export_corrections.py (Hito 0) para localizar los
+      # job_dirs cuando se invoca vía `docker compose exec app ...`.
+      PILOT_QUEUE_DIR: /tmp/queue
     restart: unless-stopped
     volumes:
       # Cache de pesos del modelo (~151 MB, F4 + 5 AttnMIL). Persistencia

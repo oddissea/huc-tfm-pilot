@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import os
 from pathlib import Path
 
 # Si se ejecuta como script suelto (no como módulo), añadir el repo
@@ -32,7 +33,15 @@ from src.corrections.export import DEFAULT_BUCKET, export_all  # noqa: E402
 
 logger = logging.getLogger("export_corrections")
 
-DEFAULT_QUEUE_DIR = Path.home() / "huc-tfm-pilot" / "queue"
+# Orden de precedencia para la queue dir:
+#   1. --queue-dir explícito en CLI.
+#   2. $PILOT_QUEUE_DIR (lo seteamos en docker-compose para que
+#      dentro del container resuelva a /tmp/queue).
+#   3. ~/huc-tfm-pilot/queue (default razonable en host).
+DEFAULT_QUEUE_DIR = Path(
+    os.environ.get("PILOT_QUEUE_DIR")
+    or Path.home() / "huc-tfm-pilot" / "queue"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
