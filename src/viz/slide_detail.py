@@ -1400,6 +1400,60 @@ def _render_slide_label_panel(
                 st.rerun()
 
 
+def _parse_idx_range_text(raw: str, n_patches: int) -> tuple[tuple[int, ...], list[str]]:
+    """Parser de la sintaxis de rango usada en el panel de correcciones v4.
+
+    Acepta tokens coma-separados; cada token puede ser un entero (``12``)
+    o un rango inclusivo (``20-30``). Tokens vacíos se ignoran (permite
+    ``", 12, , 15,"``).
+
+    Args:
+        raw: cadena tecleada por el patólogo. Espacios extra ignorados.
+        n_patches: tamaño total para filtrar fuera de rango.
+
+    Returns:
+        ``(idxs, errors)`` donde ``idxs`` es una tupla ordenada y sin
+        duplicados de enteros válidos en ``[0, n_patches-1]``, y
+        ``errors`` es una lista de mensajes humanos de tokens inválidos
+        (formato no reconocido, fuera de rango, etc.).
+    """
+    if not raw or not raw.strip():
+        return (), []
+    seen: set[int] = set()
+    errors: list[str] = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "-" in tok and not tok.startswith("-"):
+            # Rango inclusivo "a-b".
+            try:
+                lo_str, hi_str = tok.split("-", 1)
+                lo, hi = int(lo_str), int(hi_str)
+            except ValueError:
+                errors.append(f"Token «{tok}» no es un rango válido.")
+                continue
+            if lo > hi:
+                lo, hi = hi, lo  # tolerante: "30-20" → 20..30
+            for v in range(lo, hi + 1):
+                if 0 <= v < n_patches:
+                    seen.add(v)
+                else:
+                    errors.append(f"#{v} fuera de rango [0, {n_patches - 1}].")
+        else:
+            # Entero suelto.
+            try:
+                v = int(tok)
+            except ValueError:
+                errors.append(f"Token «{tok}» no es un entero válido.")
+                continue
+            if 0 <= v < n_patches:
+                seen.add(v)
+            else:
+                errors.append(f"#{v} fuera de rango [0, {n_patches - 1}].")
+    return tuple(sorted(seen)), errors
+
+
 def _render_corrections_panel(
     job: "Job",
     *,
@@ -1468,13 +1522,21 @@ def _render_corrections_panel(
             order = np.arange(n_patches)
             confidences = np.full(n_patches, np.nan)
 
-        # Input numérico: el patólogo lee el #idx en el hover del visor
-        # y lo teclea aquí. Arranca vacío (placeholder '—') para no
-        # confundir al patólogo con un parche pre-seleccionado que no
-        # ha pedido. El visor solo destaca y centra cuando hay valor.
+        # Estado canónico v4: el «set» de parches seleccionados (tuple
+        # ordenada sin duplicados) y el «last» (último idx tocado, ancla
+        # del pan/zoom y del caption en single-select). Ambos viven
+        # alongside del widget_key del number_input para conservar la UX
+        # actual de single-patch. La sincronización se hace en los
+        # callbacks on_change del number_input y del text_input de rango.
         widget_key = f"corr_idx_{job.job_id}"
+        range_text_key = f"corr_idx_range_{job.job_id}"
+        idx_set_key = f"corr_idx_set_{job.job_id}"
+        idx_last_key = f"corr_idx_last_{job.job_id}"
         pending_key = f"corr_pending_target_{job.job_id}"
+        pending_set_key = f"corr_pending_set_{job.job_id}"
+        pending_action_key = f"corr_pending_action_{job.job_id}"
         pending_pan_key = f"corr_pending_pan_{job.job_id}"
+        range_errors_key = f"corr_range_errors_{job.job_id}"
         # NOTA: la aplicación pending_key → widget_key se hace en
         # render_slide_detail (antes del visor) para evitar
         # desincronización visor↔combo. Aquí solo escribimos en
@@ -1482,13 +1544,55 @@ def _render_corrections_panel(
         # El tecleado en number_input usa on_change para señalizar que
         # es navegación explícita y debe panear/zoomear el visor.
 
+        # Inicialización idempotente del estado canónico v4.
+        st.session_state.setdefault(idx_set_key, ())
+        st.session_state.setdefault(idx_last_key, None)
+
         def _on_idx_typed() -> None:
             # Cuando el patólogo teclea un #idx + Enter, el flujo es
             # navegación explícita (igual que el botón siguiente): el
             # visor debe centrar y zoomear ese parche, no solo
             # marcarlo en amarillo silenciosamente fuera del viewport.
-            if st.session_state.get(widget_key) is not None:
-                st.session_state[pending_pan_key] = True
+            raw = st.session_state.get(widget_key)
+            if raw is None:
+                # number_input limpiado: vaciar el set canónico también.
+                st.session_state[idx_set_key] = ()
+                st.session_state[idx_last_key] = None
+                return
+            val = int(raw)
+            st.session_state[idx_set_key] = (val,)
+            st.session_state[idx_last_key] = val
+            st.session_state[pending_pan_key] = True
+            # Limpiar el text_input de rango para evitar inconsistencia
+            # visual (si el patólogo había tecleado un rango antes y
+            # ahora cambia a single-patch via number_input).
+            if range_text_key in st.session_state:
+                st.session_state[range_text_key] = ""
+
+        def _on_range_typed() -> None:
+            raw = (st.session_state.get(range_text_key) or "").strip()
+            if not raw:
+                # El patólogo limpió el text_input. No tocamos el
+                # number_input ni el set canónico — si tenía un valor
+                # previo, sigue válido.
+                st.session_state[range_errors_key] = []
+                return
+            parsed, errors = _parse_idx_range_text(raw, n_patches)
+            st.session_state[range_errors_key] = errors
+            if not parsed:
+                # Solo errores: no se modifica el estado canónico.
+                return
+            st.session_state[idx_set_key] = parsed
+            st.session_state[idx_last_key] = parsed[-1]
+            st.session_state[pending_pan_key] = True
+            # Reflejar el ancla del lote en el number_input para que el
+            # visor (que aún consume widget_key) siga panéando/zoomeando
+            # al último elemento del set. El text_input conserva el
+            # rango tecleado, lo que da al patólogo doble feedback:
+            # número de ancla y composición del lote. Streamlit permite
+            # escribir el widget key de otro widget desde un callback.
+            if widget_key in st.session_state:
+                st.session_state[widget_key] = parsed[-1]
 
         # Set de parches ya corregidos — para excluirlos del cálculo del
         # 'siguiente más incierto'.
@@ -1497,7 +1601,7 @@ def _render_corrections_panel(
         }
 
         st.markdown(f"**Parche a corregir** (0–{n_patches - 1})")
-        col_idx, col_next = st.columns([2, 1])
+        col_idx, col_range, col_next = st.columns([2, 2, 1])
         with col_idx:
             raw_idx = st.number_input(
                 "Parche a corregir",
@@ -1509,7 +1613,49 @@ def _render_corrections_panel(
                 placeholder="—",
                 label_visibility="collapsed",
             )
-        patch_idx: int | None = int(raw_idx) if raw_idx is not None else None
+        with col_range:
+            st.text_input(
+                "Rango de parches",
+                key=range_text_key,
+                on_change=_on_range_typed,
+                placeholder="o p. ej. 12, 15, 20-30",
+                help=(
+                    "Selección por lote: lista de índices separados por "
+                    "comas, con rangos inclusivos. Ejemplos: `12, 15` "
+                    "selecciona dos parches sueltos; `20-30` selecciona "
+                    "del 20 al 30 (inclusive); `12, 20-30, 45` combina "
+                    "ambas formas. Sustituye al `#idx` del number_input "
+                    "al teclear."
+                ),
+                label_visibility="collapsed",
+            )
+        # Avisos del parser (tokens inválidos o fuera de rango). Se
+        # muestran como st.warning bajo los inputs y se preservan entre
+        # reruns hasta que el patólogo cambia el texto del rango.
+        for err in st.session_state.get(range_errors_key, []) or []:
+            st.warning(err)
+
+        # `patch_idx` ancla la UI single-patch (caption, save, visor).
+        # Prioridad: (1) el last canónico si hay set no vacío,
+        # (2) el number_input clásico, (3) None.
+        idx_set_current: tuple[int, ...] = tuple(st.session_state.get(idx_set_key, ()))
+        if idx_set_current:
+            patch_idx: int | None = int(
+                st.session_state.get(idx_last_key) or idx_set_current[-1]
+            )
+        elif raw_idx is not None:
+            patch_idx = int(raw_idx)
+        else:
+            patch_idx = None
+
+        # Feedback inmediato cuando hay un lote >1 (sin caption aún
+        # — eso va en próxima sesión). El usuario ve cuántos parches
+        # tiene seleccionados y el last como ancla.
+        if len(idx_set_current) > 1:
+            st.caption(
+                f"📌 Lote actual: **{len(idx_set_current)} parches** · "
+                f"ancla `#{patch_idx}` (último seleccionado)."
+            )
 
         with col_next:
             # next_uncertain: primer parche no corregido del ranking.
@@ -1676,32 +1822,63 @@ def _render_corrections_panel(
             placeholder="p. ej. 'morfología poco clara, posible artefacto de tinción'",
         )
 
+        # Resolución del conjunto a guardar: el set canónico v4 si tiene
+        # contenido, o el patch_idx single en su defecto (backward-compat).
+        # El botón muestra el conteo cuando es lote para que el patólogo
+        # tenga feedback inmediato antes de pulsar.
+        save_idxs: tuple[int, ...]
+        if idx_set_current:
+            save_idxs = idx_set_current
+        else:
+            save_idxs = (patch_idx,)
+        save_label = (
+            "💾 Guardar corrección"
+            if len(save_idxs) <= 1
+            else f"💾 Aplicar a {len(save_idxs)} parches"
+        )
+
         col_save, col_info = st.columns([1, 4])
         with col_save:
             if st.button(
-                "💾 Guardar corrección",
+                save_label,
                 key=f"corr_save_{job.job_id}",
                 disabled=new_label is None,
                 type="primary",
             ):
-                pred_orig_str = CLASS_NAMES[int(pred_index[patch_idx])]
-                probs_orig = (
-                    patch_probs[patch_idx].tolist()
-                    if patch_probs is not None
-                    else None
-                )
-                record_correction(
-                    job.job_dir,
-                    slide_uuid=job.job_id,
-                    patch_idx=patch_idx,
-                    label_corr=new_label,
-                    pred_orig=pred_orig_str,
-                    probs_orig=probs_orig,
-                    patologo_id=_patologo_id(),
-                    model_version=_model_version(),
-                    comment=comment or "",
-                )
-                st.success(f"Corrección guardada: parche #{patch_idx} → {new_label}")
+                # Lote: aplicamos la misma etiqueta a todos los idx del
+                # set en orden. Cada uno persiste un registro independiente
+                # en corrections.jsonl (append-only) con su pred_orig y
+                # probs_orig propios — last-wins se resuelve al leer.
+                for save_idx in save_idxs:
+                    pred_orig_str = CLASS_NAMES[int(pred_index[save_idx])]
+                    probs_orig = (
+                        patch_probs[save_idx].tolist()
+                        if patch_probs is not None
+                        else None
+                    )
+                    record_correction(
+                        job.job_dir,
+                        slide_uuid=job.job_id,
+                        patch_idx=save_idx,
+                        label_corr=new_label,
+                        pred_orig=pred_orig_str,
+                        probs_orig=probs_orig,
+                        patologo_id=_patologo_id(),
+                        model_version=_model_version(),
+                        comment=comment or "",
+                    )
+                if len(save_idxs) <= 1:
+                    st.success(
+                        f"Corrección guardada: parche #{save_idxs[0]} → {new_label}"
+                    )
+                else:
+                    st.success(
+                        f"Correcciones guardadas: {len(save_idxs)} parches → {new_label}"
+                    )
+                # Tras guardar, vaciamos el set y last canónicos para
+                # que la próxima selección arranque limpia.
+                st.session_state[idx_set_key] = ()
+                st.session_state[idx_last_key] = None
                 st.rerun()
         with col_info:
             if new_label is None:
