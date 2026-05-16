@@ -34,6 +34,34 @@ blob remoto.
   se invoca vía `docker compose exec`. No hace falta pasar
   `--queue-dir` explícitamente.
 
+## Limpieza pre-deploy (¡no saltarse!)
+
+Durante el desarrollo y QA, el bucket
+`gs://huc-tfm-pilot-corrections/` acumula **correcciones de prueba**
+del propio alumno (no son del patólogo). Antes de instalar el
+piloto en el ordenador del HUC hay que dejar el bucket vacío para
+que las primeras entradas reales del patólogo estén en un estado
+limpio y bien identificado.
+
+Como el bucket tiene **versioning** activo, un `gsutil rm` normal
+deja las versiones anteriores como soft-deleted (recuperables).
+Para una limpieza de verdad:
+
+```bash
+# Listar todo lo que hay (incluyendo versiones anteriores)
+gsutil ls -a gs://huc-tfm-pilot-corrections/
+
+# Borrar TODAS las versiones de TODOS los objetos. Irreversible.
+gsutil -m rm -a gs://huc-tfm-pilot-corrections/**
+
+# Verificar que el bucket está completamente vacío
+gsutil ls -a gs://huc-tfm-pilot-corrections/
+```
+
+Si el bucket aparece vacío en el último `gsutil ls -a`, todo
+limpio. A partir de ese momento, la primera corrección que se
+suba será del primer slide procesado en el HUC en producción.
+
 ## Setup del cron en HUC
 
 Editar el crontab del usuario que corre el container:
