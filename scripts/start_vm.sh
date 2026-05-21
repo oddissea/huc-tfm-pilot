@@ -186,9 +186,9 @@ apply_post_create() {
     local zone="$1"
     log "Reasociando schedule de auto-stop…"
     gcloud compute instances stop "${VM_NAME}" --zone="${zone}" --quiet || true
-    gcloud compute instances add-resource-policies "${VM_NAME}" --zone="${zone}" --resource-policies=auto-stop-23h
+    gcloud compute instances add-resource-policies "${VM_NAME}" --zone="${zone}" --resource-policies=auto-stop-2000
     gcloud compute instances start "${VM_NAME}" --zone="${zone}"
-    log "VM en ${zone} arrancada con schedule auto-stop-23h ✓"
+    log "VM en ${zone} arrancada con schedule auto-stop-2000 ✓"
 }
 
 # ---------------------------------------------------------------------------
