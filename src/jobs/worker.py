@@ -284,18 +284,19 @@ def _worker_loop() -> None:
                 if (
                     summary["pruned_dirs"]
                     or summary["pruned_raws"]
-                    or summary.get("exported_corr")
-                    or summary.get("export_errors")
+                    or summary.get("archived_corr")
+                    or summary.get("archive_errors")
                 ):
                     logger.info(
                         "TTL prune: %d job_dirs + %d raws huérfanos eliminados "
-                        "(correcciones exportadas: %d, errores: %d, "
-                        "borrados pospuestos por fallo de export: %d)",
+                        "(correcciones archivadas: %d, features archivados: %d, "
+                        "errores: %d, borrados pospuestos por fallo de archive: %d)",
                         summary["pruned_dirs"],
                         summary["pruned_raws"],
-                        summary.get("exported_corr", 0),
-                        summary.get("export_errors", 0),
-                        summary.get("skipped_due_to_export_err", 0),
+                        summary.get("archived_corr", 0),
+                        summary.get("archived_features", 0),
+                        summary.get("archive_errors", 0),
+                        summary.get("skipped_due_to_archive_err", 0),
                     )
             except Exception:
                 logger.exception("TTL prune falló")

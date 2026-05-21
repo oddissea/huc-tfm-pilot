@@ -246,52 +246,57 @@ class JobManager:
            existir post-M4.6 porque _do_preprocess hace unlink, pero esto
            cubre estados heredados o casos donde el unlink falló).
 
-        Hito 0 del módulo de aprendizaje: ANTES de borrar un job_dir, si
-        contiene un ``corrections.jsonl`` con correcciones, se exporta a
-        ``gs://huc-tfm-pilot-corrections/<job_id>/`` para que el TTL no
-        se lleve por delante el trabajo del patólogo. Si la exportación
-        falla por cualquier razón (GCS caído, auth expirado, etc.), el
+        Hito 0+1 del módulo de aprendizaje: ANTES de borrar un job_dir,
+        si contiene un ``corrections.jsonl`` con correcciones, se copia
+        junto con ``features.npy`` y ``meta.json`` al archive local
+        bind-montado en el host (``$PILOT_ARCHIVE_DIR``) para que el TTL
+        no se lleve por delante el trabajo del patólogo. Si la copia
+        falla por cualquier razón (disco lleno, permisos, etc.), el
         job_dir NO se borra y queda para el siguiente prune — prefiero
         un job extra de 25h en disco antes que perder correcciones.
 
         Devuelve dict con contadores para logging.
         """
-        from src.corrections.export import export_job_safe
+        from src.corrections.archive import archive_job_safe
 
         now = time.time()
         cutoff = now - max_age_hours * 3600
         pruned_dirs = 0
         pruned_raws = 0
-        exported_corr = 0
-        export_errors = 0
-        skipped_due_to_export_err = 0
+        archived_corr = 0
+        archived_features = 0
+        archive_errors = 0
+        skipped_due_to_archive_err = 0
         with self._lock:
             for job in self._list_unlocked():
                 terminal = job.status in (JobStatus.DONE, JobStatus.FAILED)
                 if not terminal:
                     continue
                 if job.updated_at < cutoff:
-                    # Hito 0: rescatar correcciones antes del borrado.
-                    # export_job_safe nunca lanza; devuelve dict con error.
-                    export_res = export_job_safe(job.job_dir)
-                    if export_res["error"]:
-                        export_errors += 1
-                        skipped_due_to_export_err += 1
+                    # Hito 0+1: rescatar correcciones + features antes del borrado.
+                    # archive_job_safe nunca lanza; devuelve dict con error.
+                    archive_res = archive_job_safe(job.job_dir)
+                    if archive_res["error"]:
+                        archive_errors += 1
+                        skipped_due_to_archive_err += 1
                         logger.warning(
-                            "prune: NO borro job %s — fallo al exportar "
+                            "prune: NO borro job %s — fallo al archivar "
                             "correcciones (%s). Reintento en próximo prune.",
-                            job.short_id, export_res["error"],
+                            job.short_id, archive_res["error"],
                         )
                         continue
-                    if export_res["uploaded_corrections"]:
-                        exported_corr += 1
+                    if archive_res["archived_corrections"]:
+                        archived_corr += 1
                         logger.info(
-                            "prune: exportadas %d correcciones de job %s a "
-                            "gs://huc-tfm-pilot-corrections/ antes del borrado.",
-                            export_res["n_corrections"], job.short_id,
+                            "prune: archivadas %d correcciones de job %s al "
+                            "archive local antes del borrado (features=%s).",
+                            archive_res["n_corrections"], job.short_id,
+                            archive_res["archived_features"],
                         )
-                    # OK: el job no tenía correcciones, o ya estaban exportadas,
-                    # o se acaban de subir. Borramos.
+                    if archive_res["archived_features"]:
+                        archived_features += 1
+                    # OK: el job no tenía correcciones, o ya estaban archivadas,
+                    # o se acaban de copiar. Borramos.
                     shutil.rmtree(job.job_dir, ignore_errors=True)
                     pruned_dirs += 1
                     continue
@@ -309,9 +314,10 @@ class JobManager:
         return {
             "pruned_dirs": pruned_dirs,
             "pruned_raws": pruned_raws,
-            "exported_corr": exported_corr,
-            "export_errors": export_errors,
-            "skipped_due_to_export_err": skipped_due_to_export_err,
+            "archived_corr": archived_corr,
+            "archived_features": archived_features,
+            "archive_errors": archive_errors,
+            "skipped_due_to_archive_err": skipped_due_to_archive_err,
         }
 
     # ------------------------------------------------------------------

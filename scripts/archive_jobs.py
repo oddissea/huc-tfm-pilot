@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""CLI wrapper de ``src.corrections.export``.
+"""CLI wrapper de ``src.corrections.archive``.
 
-Permite invocar el export manualmente o desde cron. La lógica core
-vive en ``src/corrections/export.py``; aquí solo argumentos y logging.
+Permite invocar el archivado manualmente o desde cron. La lógica core
+vive en ``src/corrections/archive.py``; aquí solo argumentos y logging.
 
 Uso::
 
-    python -m scripts.export_corrections                       # default
-    python -m scripts.export_corrections --dry-run             # sim
-    python -m scripts.export_corrections --bucket otro-bucket  # override
-    python -m scripts.export_corrections --verbose             # debug
+    python -m scripts.archive_jobs                            # default
+    python -m scripts.archive_jobs --dry-run                  # sim
+    python -m scripts.archive_jobs --archive-dir /otra/ruta   # override
+    python -m scripts.archive_jobs --verbose                  # debug
 
-Exit code 0 si todo OK (o sin nada que subir), 1 si hubo errores
-en al menos un job.
+Exit code 0 si todo OK (o sin nada que archivar), 1 si hubo errores en
+al menos un job.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Si se ejecuta como script suelto (no como módulo), añadir el repo
@@ -29,9 +29,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.corrections.export import DEFAULT_BUCKET, export_all  # noqa: E402
+from src.corrections.archive import DEFAULT_ARCHIVE_DIR, archive_all  # noqa: E402
 
-logger = logging.getLogger("export_corrections")
+logger = logging.getLogger("archive_jobs")
 
 # Orden de precedencia para la queue dir:
 #   1. --queue-dir explícito en CLI.
@@ -54,12 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Directorio de la cola (default: {DEFAULT_QUEUE_DIR})",
     )
     parser.add_argument(
-        "--bucket", default=DEFAULT_BUCKET,
-        help=f"Nombre del bucket GCS (default: {DEFAULT_BUCKET})",
+        "--archive-dir", type=Path, default=DEFAULT_ARCHIVE_DIR,
+        help=f"Directorio del archive local (default: {DEFAULT_ARCHIVE_DIR})",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Simula sin subir nada (útil para auditar qué se subiría).",
+        help="Simula sin copiar nada (útil para auditar qué se archivaría).",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true",
@@ -77,23 +77,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     logger.info(
-        "Exportando %s → gs://%s/ (dry_run=%s)",
-        args.queue_dir, args.bucket, args.dry_run,
+        "Archivando %s → %s (dry_run=%s)",
+        args.queue_dir, args.archive_dir, args.dry_run,
     )
 
-    results = export_all(args.queue_dir, args.bucket, dry_run=args.dry_run)
+    results = archive_all(args.queue_dir, args.archive_dir, dry_run=args.dry_run)
 
-    n_uploaded = sum(1 for r in results if r["uploaded_corrections"])
+    n_archived_corr = sum(1 for r in results if r["archived_corrections"])
+    n_archived_feat = sum(1 for r in results if r["archived_features"])
     n_errors = sum(1 for r in results if r["error"])
     total_corr = sum(r["n_corrections"] for r in results)
 
     for r in results:
         if r["error"]:
             logger.error("FAIL %s — %s", r["job_id"], r["error"])
-        elif r["uploaded_corrections"]:
+        elif r["archived_corrections"]:
             logger.info(
-                "UP   %s — %d correcciones, meta=%s",
-                r["job_id"], r["n_corrections"], r["uploaded_meta"],
+                "OK   %s — %d correcciones, features=%s, meta=%s",
+                r["job_id"], r["n_corrections"],
+                r["archived_features"], r["archived_meta"],
             )
         elif r["n_corrections"] > 0:
             logger.debug(
@@ -102,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     logger.info(
-        "Resumen: %d jobs con correcciones (total %d entries), %d subidos, %d errores.",
-        len(results), total_corr, n_uploaded, n_errors,
+        "Resumen: %d jobs con correcciones (total %d entries), %d archivados "
+        "(%d con features), %d errores.",
+        len(results), total_corr, n_archived_corr, n_archived_feat, n_errors,
     )
     return 1 if n_errors > 0 else 0
 

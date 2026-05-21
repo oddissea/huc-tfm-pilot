@@ -250,8 +250,14 @@ certbot/www/*
 *.pth
 *.h5
 
+# Bind mounts del piloto (creados por docker compose al arrancar).
+# /queue/   — cola efímera de jobs en proceso, sometida al TTL del prune.
+# /archive/ — destino del archivado de correcciones + features (Hito 1).
+#             En HUC es la única persistencia de datos del patólogo más
+#             allá de 24 h; se recoge de aquí para reentrenar.
+/queue/
+/archive/
+
 # Logs locales si se generan.
 *.log
 logs/
-
-# (Cache de pesos descargados de GCS ya cubierto por /weights/ arriba.)

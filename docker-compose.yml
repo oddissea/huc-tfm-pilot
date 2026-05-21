@@ -7,18 +7,27 @@ services:
       - "8501"
     environment:
       # Path de la cola dentro del container — usado por
-      # scripts/export_corrections.py (Hito 0) para localizar los
-      # job_dirs cuando se invoca vía `docker compose exec app ...`.
+      # scripts/archive_jobs.py (Hito 0+1) para localizar los job_dirs
+      # cuando se invoca vía `docker compose exec app ...`.
       PILOT_QUEUE_DIR: /tmp/queue
+      # Path del archive local dentro del container — destino de las
+      # correcciones + features que sobreviven al TTL del prune (Hito 1).
+      # En el host vive en ./archive/ (bind mount abajo).
+      PILOT_ARCHIVE_DIR: /var/archive
     restart: unless-stopped
     volumes:
       # Cache de pesos del modelo (~151 MB, F4 + 5 AttnMIL). Persistencia
-      # entre reinicios del container para no re-descargar de GCS cada vez.
+      # entre reinicios del container para no re-descargar cada vez.
       - ./weights:/app/weights
       # Cola de jobs (uploads + resultados). Persistencia entre redeploys
-      # para no perder predicciones al actualizar la app. M4.6 añadirá
+      # para no perder predicciones al actualizar la app. M4.6 añadió
       # cleanup por TTL para cumplir requisitos de privacidad.
       - ./queue:/tmp/queue
+      # Archive local de correcciones + features 512-d (Hito 1). Sobrevive
+      # al TTL del prune. En HUC esta es la ÚNICA persistencia de datos del
+      # patólogo más allá de 24h — desde aquí se recogen para reentrenar.
+      # En QA sirve también para validar el pipeline end-to-end sin GCS.
+      - ./archive:/var/archive
     deploy:
       resources:
         reservations:
