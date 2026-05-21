@@ -1,4 +1,8 @@
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
+# CUDA 12.8 + PyTorch 2.7 son la versión mínima que soporta RTX 50xx
+# (Blackwell, compute capability SM 12.0). El equipo HUC tiene una RTX
+# 5070 12 GB; cualquier imagen anterior daba "no kernel image is
+# available for execution on the device" al primer forward en GPU.
 
 # System deps:
 # - libglib2.0-0: required by opencv-python-headless at runtime
@@ -30,9 +34,9 @@ COPY assets/ ./assets/
 # App entry point.
 COPY app.py .
 
-# CLI scripts (export_corrections, etc.). Permite invocar
-# `docker compose exec app python -m scripts.export_corrections` desde
-# cron en el host de producción (red de seguridad del hook del worker).
+# CLI scripts (archive_jobs, etc.). Permite invocar
+# `docker compose exec app python -m scripts.archive_jobs` desde cron en
+# el host de producción (red de seguridad del hook del worker).
 COPY scripts/ ./scripts/
 
 EXPOSE 8501
