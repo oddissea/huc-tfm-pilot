@@ -172,7 +172,11 @@ if st.button("Ejecutar prune ahora", type="secondary", disabled=not confirm_prun
         f"({summary['archived_features']} con features). "
         f"{summary['archive_errors']} errores."
     )
-    st.session_state["confirm_prune_done"] = False
+    # Nota: Streamlit prohíbe modificar session_state[key] tras instanciar
+    # el widget con ese key (StreamlitAPIException). El checkbox de
+    # confirmación queda marcado tras el rerun; el usuario lo desmarca
+    # manualmente la próxima vez. Si conviene auto-reset, refactorizar
+    # con on_click callback.
     time.sleep(2.0)
     st.rerun()
 
@@ -206,8 +210,9 @@ if st.button("Vaciar archive AHORA", type="primary", disabled=disabled):
             shutil.rmtree(sub, ignore_errors=True)
             deleted += 1
     st.success(f"Archive vaciado: borrados {deleted} subdirectorios.")
-    st.session_state["confirm_archive_1"] = False
-    st.session_state["confirm_archive_2"] = False
+    # Mismo caveat que en "Ejecutar prune ahora": Streamlit no permite
+    # resetear los checkboxes tras instanciar; quedan marcados hasta que
+    # el usuario los desmarque a mano.
     time.sleep(2.0)
     st.rerun()
 
