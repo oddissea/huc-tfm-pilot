@@ -34,6 +34,11 @@ COPY assets/ ./assets/
 # App entry point.
 COPY app.py .
 
+# Páginas adicionales del sidebar (multipage Streamlit). Streamlit las
+# autodescubre si están en ./pages/ junto al script principal. Hoy
+# contiene ⚙️ Configuración para auto-servicio del operador.
+COPY pages/ ./pages/
+
 # CLI scripts (archive_jobs, etc.). Permite invocar
 # `docker compose exec app python -m scripts.archive_jobs` desde cron en
 # el host de producción (red de seguridad del hook del worker).
