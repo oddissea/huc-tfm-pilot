@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import threading
 import time
@@ -40,11 +41,14 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = 1.0
 
 # TTL de la cola (M4.6): cada cuánto invocar manager.prune() y umbral de
-# edad para borrar job_dirs DONE/FAILED. 24 h es generoso — la cola se
-# usa "online" durante una sesión; 24 h cubre uso de un día sin perder
-# resultados que el patólogo todavía pudiera querer ver.
+# edad para borrar job_dirs DONE/FAILED. 24 h es el default (cola "online"
+# durante una sesión; un día cubre uso normal sin perder resultados que
+# el patólogo todavía pudiera querer ver). Configurable vía env var
+# PILOT_TTL_HOURS para deploy HUC, donde puede convenir un TTL más
+# generoso (p. ej. 168 = 7 días) ya que el archive (Hito 1) preserva
+# correcciones + features pase lo que pase.
 PRUNE_INTERVAL_SECONDS = 300.0  # 5 min
-TTL_HOURS = 24.0
+TTL_HOURS = float(os.environ.get("PILOT_TTL_HOURS", "24.0"))
 
 # Mapeo de etiquetas patch-level del H5 a clases ternarias (ADE/NOR/CAR).
 # TUM se renombró a CAR en la memoria del TFM (sesión #36); el código

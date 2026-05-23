@@ -14,6 +14,11 @@ services:
       # correcciones + features que sobreviven al TTL del prune (Hito 1).
       # En el host vive en ./archive/ (bind mount abajo).
       PILOT_ARCHIVE_DIR: /var/archive
+      # TTL del prune en horas. Default 24h (uso QA). En HUC puede
+      # convenir más generoso (p. ej. 168 = 7 días) ya que el archive
+      # preserva correcciones + features pase lo que pase. Para
+      # cambiarlo descomentar la línea siguiente:
+      #PILOT_TTL_HOURS: "168"
     restart: unless-stopped
     volumes:
       # Cache de pesos del modelo (~151 MB, F4 + 5 AttnMIL). Persistencia
