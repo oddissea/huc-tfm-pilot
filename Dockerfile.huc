@@ -1,0 +1,32 @@
+# Dockerfile.huc — variante "self-contained with weights" para deploy HUC.
+#
+# Hereda de huc-pilot:dev (la imagen principal, sin pesos) y añade una
+# capa con los 6 ficheros del modelo bakeados dentro. Resultado:
+# ghcr.io/oddissea/huc-pilot:dev-with-weights, listo para `docker pull`
+# + `docker compose up` en el ordenador del HUC sin tener que
+# pre-cargar pesos por USB ni autenticarse contra GCS.
+#
+# Build:
+#   1. Asegurar que weights/ contiene los 6 ficheros descargados desde
+#      gs://huc-tfm-pilot-models/ con la estructura esperada
+#      (ver docs/deployment/PRE_LOAD_WEIGHTS.md §"Estructura esperada").
+#   2. docker compose build app                  # construye huc-pilot:dev
+#   3. docker build -f Dockerfile.huc \
+#        -t ghcr.io/oddissea/huc-pilot:dev-with-weights .
+#   4. docker push ghcr.io/oddissea/huc-pilot:dev-with-weights
+#
+# Para QA con la imagen principal (pesos por bind mount o descarga GCS),
+# seguir usando Dockerfile + docker-compose.yml estándar — esta variante
+# solo aplica al despliegue final en HUC.
+
+FROM huc-pilot:dev
+
+# Pesos del modelo F4 + 5 AttnMIL ensemble. ~150 MB total. El fast-path
+# offline de src/inference/weights.py los detecta y NO intenta GCS,
+# permitiendo arrancar el container en redes sin conectividad de salida.
+COPY weights/ /app/weights/
+
+# Etiqueta legible cuando se hace `docker images`.
+LABEL org.opencontainers.image.title="DualPath CRC — by Lumen Network (with weights)"
+LABEL org.opencontainers.image.description="HUC deploy variant: pesos F4 + AttnMIL ensemble baked in image"
+LABEL org.opencontainers.image.source="https://github.com/oddissea/huc-tfm-pilot"

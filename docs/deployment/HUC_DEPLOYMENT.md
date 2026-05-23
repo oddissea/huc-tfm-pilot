@@ -167,8 +167,12 @@ Asumiendo decisiones cerradas en la reunión.
 
 ### 5.1 Pre-arranque (alumno antes de ir al HUC)
 
-- [ ] Pre-cargar pesos del modelo en USB cifrado siguiendo
-      `PRE_LOAD_WEIGHTS.md`.
+- [ ] Construir imagen self-contained `huc-pilot:dev-with-weights`
+      siguiendo `DOCKER_IMAGE_DEPLOY.md` paso 1.
+- [ ] `docker save | gzip` → `huc-pilot-with-weights.tar.gz`
+      (~4-5 GB tras compresión).
+- [ ] Generar checksum sha256 del `.tar.gz`.
+- [ ] Copiar `.tar.gz` + `.sha256` al USB cifrado.
 - [ ] Repo del piloto clonado en USB también (por si el HUC no tiene
       acceso GitHub directo).
 - [ ] Verificar versión de Docker que se va a instalar (CE WSL2 o
@@ -177,18 +181,22 @@ Asumiendo decisiones cerradas en la reunión.
 ### 5.2 En el HUC, primer arranque
 
 - [ ] Instalar Docker (según decisión §4.1).
-- [ ] Clonar repo desde USB o `git clone https://github.com/oddissea/huc-tfm-pilot.git`.
-- [ ] Copiar pesos pre-cargados a `pilot/weights/` siguiendo
-      `PRE_LOAD_WEIGHTS.md` paso 4-5.
-- [ ] Verificar checksums: `cd pilot/weights && sha256sum -c SHA256SUMS.txt`.
+- [ ] Desde USB, verificar checksum:
+      `sha256sum -c huc-pilot-with-weights.tar.gz.sha256`.
+- [ ] Cargar imagen al daemon Docker:
+      `docker load -i huc-pilot-with-weights.tar.gz` (2-5 min).
+- [ ] Re-tagear: `docker tag huc-pilot:dev-with-weights huc-pilot:dev`
+      (para que el docker-compose.yml estándar la encuentre).
+- [ ] Clonar repo desde USB o
+      `git clone https://github.com/oddissea/huc-tfm-pilot.git`.
 - [ ] Configurar TTL inicial editando docker-compose.yml o vía la
       página Configuración tras el primer arranque (recomendado 7 días).
 - [ ] `cd pilot && docker compose up -d`.
 - [ ] Esperar ~15s, verificar logs: `docker compose logs app --tail=30`.
 - [ ] Abrir navegador en `http://localhost:8501`.
 - [ ] Sidebar → ⚙️ Configuración: ajustar TTL a 7 días.
-- [ ] Sidebar → "Cargar modelos" (debe ser instantáneo si pre-carga
-      OK; nada de descarga GCS).
+- [ ] Sidebar → "Cargar modelos" (debe ser instantáneo, pesos ya
+      cacheados desde la imagen; nada de descarga GCS).
 - [ ] Subir un slide de prueba (TIFF pequeño), confirmar que la
       inferencia funciona y el visor OpenSeadragon carga.
 
@@ -219,11 +227,17 @@ Asumiendo decisiones cerradas en la reunión.
 
 ### 6.3 Si el piloto no encuentra los pesos al arrancar
 
-- Verificar bind mount: `docker compose exec app ls -la /app/weights/`.
-- Si vacío o estructura incorrecta: revisar `PRE_LOAD_WEIGHTS.md`
-  paso 1 (estructura esperada).
-- Si correcto y aún así intenta GCS: verificar logs por error
-  intermedio.
+- Verificar que la imagen cargada es la correcta:
+  `docker images | grep huc-pilot`. Debería listar `dev` (re-tag de
+  `dev-with-weights`).
+- Verificar que los pesos están dentro de la imagen:
+  `docker compose exec app ls -la /app/weights/`. Debería listar
+  `F4/` y `attnmil_production/` con sus ficheros.
+- Si vacío: probable error en el `docker tag` del paso 5.2 — la
+  imagen activa es la `dev` original sin pesos, no la `with-weights`.
+  Solución: `docker tag huc-pilot:dev-with-weights huc-pilot:dev` +
+  `docker compose up -d --force-recreate app`.
+- Si aún así intenta GCS: verificar logs por error intermedio.
 
 ### 6.4 Si tras N horas de uso aparecen errores de prune
 
@@ -255,10 +269,10 @@ Asumiendo decisiones cerradas en la reunión.
 
 ## 8. Referencias internas
 
-- `docs/deployment/ARCHIVE_CORRECCIONES.md` — arquitectura del archive
-  local.
-- `docs/deployment/PRE_LOAD_WEIGHTS.md` — procedimiento de pre-carga
-  de pesos por USB.
+- `docs/deployment/ARCHIVE_CORRECCIONES.md` — arquitectura del
+  archive local.
+- `docs/deployment/DOCKER_IMAGE_DEPLOY.md` — construcción + transfer
+  + load de la imagen self-contained `huc-pilot:dev-with-weights`.
 - `docs/learning/HITO_2_FINE_TUNE_F4.md` — plan operativo Hito 2.
-- `docs/HUC-PC.pdf` — factura del equipo (untracked, decisión
-  pendiente de versionar).
+- `docs/QA_EDUARDO.md` — guía corta de QA para Eduardo previa a la
+  reunión.

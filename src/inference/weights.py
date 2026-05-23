@@ -8,11 +8,12 @@ Dos modos de operación:
       F4/final_inference_model.pth                                -- F4 patch-level
       attnmil_production/seed_{42,123,456,789,2026}/model.pth     -- 5 modelos ensemble
 
-- **Offline (HUC)**: si los 6 ficheros ya están en ``WEIGHTS_DIR`` (bind
-  mount Docker), NO se inicializa el cliente GCS. Permite arrancar el
-  piloto en máquinas sin credenciales ni conectividad de salida, con los
-  pesos pre-cargados manualmente (ver
-  ``docs/deployment/PRE_LOAD_WEIGHTS.md``).
+- **Offline (HUC)**: si los 6 ficheros ya están en ``WEIGHTS_DIR``
+  (típicamente bakeados dentro de la imagen ``dev-with-weights`` para
+  deploy HUC, o vía bind mount Docker en otros escenarios), NO se
+  inicializa el cliente GCS. Permite arrancar el piloto en máquinas
+  sin credenciales ni conectividad de salida (ver
+  ``docs/deployment/DOCKER_IMAGE_DEPLOY.md``).
 
 Cada ``seed_N/model.pth`` es un AttnMIL ternario 512-d entrenado sobre los
 91 slides clínicos del cohort §5.9 **sin** validación cruzada (artefacto de
