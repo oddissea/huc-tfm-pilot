@@ -1,6 +1,8 @@
-# Despliegue del piloto en el HUC
+# Despliegue de DualPath CRC en el HUC
 
-Documento operativo. Doble propósito: (a) referencia técnica del
+Documento operativo de despliegue de **DualPath CRC** (el piloto, by
+Lumen Network) en el ordenador del Hospital Universitario de Canarias.
+Doble propósito: (a) referencia técnica del
 deploy en el HUC PC, (b) agenda de decisiones para la reunión con
 Eduardo Salido (2026-05-28).
 

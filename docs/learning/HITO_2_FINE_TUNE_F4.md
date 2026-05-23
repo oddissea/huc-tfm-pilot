@@ -1,6 +1,8 @@
 # Hito 2 — Fine-tune del head F4 con replay buffer
 
-Documento de diseño operativo. **NO implementado todavía**: este doc
+Hito del módulo de aprendizaje de **DualPath CRC** (el piloto, by Lumen
+Network). Documento de diseño operativo. **NO implementado todavía**:
+este doc
 sirve para que la sesión que arranque la implementación parta de un
 plan razonado, no de cero.
 

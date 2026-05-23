@@ -29,7 +29,7 @@ fi
 
 # Cabecera con timestamp.
 {
-    echo "# HUC TFM Pilot — credenciales BasicAuth iniciales"
+    echo "# DualPath CRC — by Lumen Network — credenciales BasicAuth iniciales"
     echo "# Generadas: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "# Formato: usuario:contraseña"
     echo "#"

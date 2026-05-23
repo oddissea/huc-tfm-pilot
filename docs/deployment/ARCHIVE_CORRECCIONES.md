@@ -1,6 +1,7 @@
 # Archive local de correcciones del patólogo + features 512-d
 
-Hitos 0+1 del módulo de aprendizaje. Garantiza que ningún
+Hitos 0+1 del módulo de aprendizaje de **DualPath CRC** (el piloto, by
+Lumen Network). Garantiza que ningún
 `corrections.jsonl` ni el `features.npy` asociado desaparezcan por el
 TTL de 24 h del worker sin haber sido copiados a un archive persistente
 del host.

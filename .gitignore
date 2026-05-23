@@ -261,3 +261,7 @@ certbot/www/*
 # Logs locales si se generan.
 *.log
 logs/
+
+# Material privado de Eduardo / HUC, NO versionar
+docs/HUC-PC.pdf
+docs/IMG_0194.jpeg

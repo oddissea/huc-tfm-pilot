@@ -1,5 +1,9 @@
 # Pre-carga de pesos del modelo (deploy HUC offline)
 
+Procedimiento para pre-cargar los pesos del modelo **DualPath CRC** (el
+piloto, by Lumen Network) antes del primer arranque en el HUC, sin
+necesidad de conectividad a GCS.
+
 Por defecto, `src/inference/weights.py` descarga los pesos del modelo F4
 + los 5 AttnMIL desde `gs://huc-tfm-pilot-models/` al primer arranque
 del container. En el HUC, donde el host no tiene credenciales GCS ni
