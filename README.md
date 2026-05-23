@@ -1,10 +1,12 @@
-# HUC TFM Pilot
+# DualPath CRC — by Lumen Network
 
-Demo interactiva del modelo F4 (BiT-M dual-stream + AttnMIL ternario 512-d) sobre WSI colorrectales, desplegada como container Docker con GPU (NVIDIA L4 en GCP, RTX 5070 en el HUC PC tras la defensa).
+Piloto del modelo **DualPath CRC** (BiT-M dual-stream + AttnMIL ternario 512-d) sobre WSI colorrectales, desplegado como container Docker con GPU (NVIDIA L4 en GCP para QA, RTX 5070 en el HUC PC tras la defensa).
+
+**Lumen Network** es la marca paraguas pensada para una eventual plataforma federada multi-hospital; **DualPath** es la familia de modelos basada en la arquitectura dual-stream; **CRC** la variante para colorrectal (este TFM). Otras variantes (otros órganos, otras arquitecturas) podrían sumarse en el futuro bajo el mismo paraguas.
 
 ## Stack
 
-- **App**: Streamlit + PyTorch 2.5 + CUDA 12.4
+- **App**: Streamlit + PyTorch 2.7 + CUDA 12.8
 - **Reverse proxy + HTTPS**: Nginx + Let's Encrypt (Certbot)
 - **Auth**: BasicAuth con `htpasswd` por usuario nominal
 - **Container runtime**: Docker Compose v2 + NVIDIA Container Toolkit

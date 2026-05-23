@@ -34,7 +34,7 @@ from src.jobs.manager import get_manager
 
 
 st.set_page_config(
-    page_title="HUC TFM Pilot — Configuración",
+    page_title="DualPath CRC — Configuración",
     page_icon="⚙️",
     layout="wide",
 )

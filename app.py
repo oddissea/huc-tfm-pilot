@@ -1,4 +1,4 @@
-"""HUC TFM Pilot — Streamlit app.
+"""DualPath CRC — by Lumen Network. Streamlit app.
 
 Estado actual (M4.4): subida múltiple de TIFF/H5, cola persistente en disco
 efímero, worker secuencial que convierte TIFF→H5 (real) y ejecuta la
@@ -52,7 +52,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 _LOGO_PATH = str(Path(__file__).parent / "assets" / "oddissea.png")
 
 st.set_page_config(
-    page_title="HUC TFM Pilot",
+    page_title="DualPath CRC",
     page_icon=_LOGO_PATH,
     layout="wide",
 )
@@ -202,7 +202,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🩺 HUC TFM Pilot")
+st.title("🩺 DualPath CRC — by Lumen Network")
 st.markdown(
     "<p style='font-style: italic; color: #261B17; opacity: 0.85; "
     "margin-top: -0.5rem; margin-bottom: 0.3rem; font-size: 1.05rem;'>"
