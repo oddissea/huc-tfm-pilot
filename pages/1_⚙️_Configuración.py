@@ -1,0 +1,223 @@
+"""Página de configuración del piloto.
+
+Accesible desde el sidebar de Streamlit (autodescubre pages/ si están
+junto a app.py). Está pensada para que Eduardo (operador único + data
+steward del HUC) administre el piloto sin tocar shell ni
+docker-compose.
+
+Tres secciones (scope mínimo viable, sesión #65):
+
+1. **Retención** — TTL del prune en días. Persistente vía
+   src/config/runtime.py.
+2. **Archive** — estadísticas read-only (jobs archivados, MB, fechas).
+3. **Acciones** — botones destructivos con doble confirmación: borrar
+   jobs DONE de la cola y vaciar el archive.
+
+Cositas previstas para iteraciones siguientes (no aquí): export del
+archive como .zip descargable, toggle modo debug, versión activa del
+modelo (Hito 5).
+"""
+
+from __future__ import annotations
+
+import shutil
+import time
+from datetime import datetime
+from pathlib import Path
+
+import streamlit as st
+
+from src.config.runtime import get_ttl_hours, set_ttl_hours
+from src.corrections.archive import DEFAULT_ARCHIVE_DIR, archive_stats
+from src.jobs import JobStatus
+from src.jobs.manager import get_manager
+
+
+st.set_page_config(
+    page_title="HUC TFM Pilot — Configuración",
+    page_icon="⚙️",
+    layout="wide",
+)
+
+st.title("⚙️ Configuración")
+st.caption(
+    "Administración del piloto sin tocar línea de comandos. Los cambios "
+    "surten efecto en el siguiente ciclo del worker (máx. 5 minutos), "
+    "sin necesidad de reiniciar."
+)
+
+
+# ---------------------------------------------------------------------------
+# Sección 1 — Retención (TTL del prune)
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.header("Retención de jobs")
+
+ttl_hours_current = get_ttl_hours()
+ttl_days_current = ttl_hours_current / 24.0
+
+st.markdown(
+    "Tiempo que un portaobjetos procesado permanece en la cola antes de "
+    "ser borrado del disco efímero. Las correcciones del patólogo y los "
+    "embeddings (features 512-d) **siempre** se copian al archive antes "
+    "de borrar, así que TTL cortos son seguros."
+)
+
+col_ttl, col_info = st.columns([1, 2])
+
+with col_ttl:
+    ttl_days_new = st.number_input(
+        "TTL en días",
+        min_value=1.0,
+        max_value=30.0,
+        value=float(ttl_days_current),
+        step=1.0,
+        format="%.1f",
+        help="Mínimo 1 día, máximo 30. Recomendado: 7 días para HUC.",
+    )
+
+with col_info:
+    if ttl_days_new < 1:
+        st.warning("TTL < 1 día es agresivo: los jobs se borran antes de que termines la jornada.")
+    elif ttl_days_new > 14:
+        st.info("TTL > 14 días: la cola acumulará portaobjetos. El archive tiene los datos críticos de todas formas.")
+    st.metric("TTL actual", f"{ttl_days_current:.1f} días", f"{ttl_hours_current:.0f} h")
+
+if ttl_days_new != ttl_days_current:
+    if st.button("Guardar nuevo TTL", type="primary"):
+        set_ttl_hours(ttl_days_new * 24.0)
+        st.success(f"TTL actualizado a {ttl_days_new:.1f} días. Surte efecto en el próximo ciclo del worker.")
+        time.sleep(1.5)
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Sección 2 — Estado del archive (read-only)
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.header("Estado del archive")
+
+stats = archive_stats(DEFAULT_ARCHIVE_DIR)
+
+if not stats["exists"] or stats["n_jobs"] == 0:
+    st.info(
+        f"Archive vacío. Ruta: `{stats['archive_dir']}`. "
+        "Aparecerán entradas cuando empieces a corregir portaobjetos y "
+        "el worker dispare el prune."
+    )
+else:
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Jobs archivados", stats["n_jobs"])
+    col_b.metric("Con features 512-d", stats["n_jobs_with_features"])
+    col_c.metric("Correcciones totales", stats["n_corrections_total"])
+    col_d.metric("Tamaño en disco", f"{stats['total_bytes'] / 1024 ** 2:.1f} MB")
+
+    col_e, col_f = st.columns(2)
+    with col_e:
+        st.metric(
+            "Último archivado",
+            datetime.fromtimestamp(stats["last_archived_at"]).strftime("%Y-%m-%d %H:%M"),
+        )
+    with col_f:
+        st.metric(
+            "Más antiguo",
+            datetime.fromtimestamp(stats["oldest_archived_at"]).strftime("%Y-%m-%d %H:%M"),
+        )
+
+    st.caption(
+        f"Ruta en disco del host: `{stats['archive_dir']}`. Para llevar "
+        "las correcciones al entorno de reentrenamiento, copia esta "
+        "carpeta vía USB cifrado o rsync."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sección 3 — Acciones (con doble confirmación)
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.header("Acciones")
+st.caption(
+    "Operaciones destructivas con doble confirmación. La caja de selección "
+    "actúa como confirmación previa al botón."
+)
+
+manager = get_manager()
+
+
+# --- Acción 1: borrar jobs DONE de la cola -----------------------------------
+
+st.subheader("Limpiar cola: borrar jobs DONE/FAILED")
+
+jobs = manager.list()
+n_done = sum(1 for j in jobs if j.status in (JobStatus.DONE, JobStatus.FAILED))
+
+st.markdown(
+    f"Hay **{n_done}** job(s) en estado DONE/FAILED en la cola. Borrarlos "
+    "ejecuta `prune(0)`: archiva correcciones + features primero y luego "
+    "elimina los job_dirs del disco efímero."
+)
+
+confirm_prune = st.checkbox(
+    "Sí, entiendo que se archivará y borrará lo no activo",
+    key="confirm_prune_done",
+)
+if st.button("Ejecutar prune ahora", type="secondary", disabled=not confirm_prune or n_done == 0):
+    summary = manager.prune(max_age_hours=0.0)
+    st.success(
+        f"prune(0) ejecutado: borrados {summary['pruned_dirs']} job_dirs, "
+        f"archivadas {summary['archived_corr']} correcciones "
+        f"({summary['archived_features']} con features). "
+        f"{summary['archive_errors']} errores."
+    )
+    st.session_state["confirm_prune_done"] = False
+    time.sleep(2.0)
+    st.rerun()
+
+
+# --- Acción 2: vaciar el archive --------------------------------------------
+
+st.subheader("Vaciar archive completo")
+
+st.markdown(
+    "Borra **todo** el contenido del archive (correcciones + features de "
+    "todos los jobs ya procesados). Hazlo SOLO después de haber recogido "
+    "una tanda completa para reentrenamiento. **Irreversible**."
+)
+
+confirm_archive_1 = st.checkbox(
+    "Sí, he recogido las correcciones que quiero conservar",
+    key="confirm_archive_1",
+)
+confirm_archive_2 = st.checkbox(
+    "Sí, entiendo que este borrado es irreversible",
+    key="confirm_archive_2",
+)
+disabled = not (confirm_archive_1 and confirm_archive_2 and stats["n_jobs"] > 0)
+if st.button("Vaciar archive AHORA", type="primary", disabled=disabled):
+    # Borrado seguro: iteramos subdirs en lugar de rmtree del root, por si
+    # alguien ha bind-montado algo más en /var/archive.
+    archive_dir = Path(stats["archive_dir"])
+    deleted = 0
+    for sub in archive_dir.iterdir():
+        if sub.is_dir() and not sub.name.startswith("."):
+            shutil.rmtree(sub, ignore_errors=True)
+            deleted += 1
+    st.success(f"Archive vaciado: borrados {deleted} subdirectorios.")
+    st.session_state["confirm_archive_1"] = False
+    st.session_state["confirm_archive_2"] = False
+    time.sleep(2.0)
+    st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Footer
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.caption(
+    "Más opciones próximamente: export del archive como .zip descargable, "
+    "modo debug, versión activa del modelo. Sugerencias bienvenidas."
+)

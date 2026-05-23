@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import threading
 import time
@@ -28,6 +27,7 @@ import traceback
 
 import numpy as np
 
+from src.config.runtime import get_ttl_hours
 from src.inference.h5_loader import load_patches_from_h5
 from src.inference.model import CLASS_NAMES
 from src.inference.predict import predict_slide
@@ -41,14 +41,16 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = 1.0
 
 # TTL de la cola (M4.6): cada cuánto invocar manager.prune() y umbral de
-# edad para borrar job_dirs DONE/FAILED. 24 h es el default (cola "online"
-# durante una sesión; un día cubre uso normal sin perder resultados que
-# el patólogo todavía pudiera querer ver). Configurable vía env var
-# PILOT_TTL_HOURS para deploy HUC, donde puede convenir un TTL más
-# generoso (p. ej. 168 = 7 días) ya que el archive (Hito 1) preserva
-# correcciones + features pase lo que pase.
+# edad para borrar job_dirs DONE/FAILED. Se lee en cada loop del prune
+# (no al import) vía get_ttl_hours(), que aplica esta cascada:
+#   1. JSON persistente editable por la UI (pages/1_configuracion.py).
+#   2. Env var PILOT_TTL_HOURS.
+#   3. Default 24.0 horas.
+# Cambios desde la UI surten efecto en el siguiente prune (max 5 min)
+# sin reiniciar el container. El archive (Hito 1) preserva correcciones
+# + features pase lo que pase con el job_dir, así que TTL más cortos
+# son seguros.
 PRUNE_INTERVAL_SECONDS = 300.0  # 5 min
-TTL_HOURS = float(os.environ.get("PILOT_TTL_HOURS", "24.0"))
 
 # Mapeo de etiquetas patch-level del H5 a clases ternarias (ADE/NOR/CAR).
 # TUM se renombró a CAR en la memoria del TFM (sesión #36); el código
@@ -284,7 +286,7 @@ def _worker_loop() -> None:
         now = time.time()
         if now - last_prune > PRUNE_INTERVAL_SECONDS:
             try:
-                summary = manager.prune(max_age_hours=TTL_HOURS)
+                summary = manager.prune(max_age_hours=get_ttl_hours())
                 if (
                     summary["pruned_dirs"]
                     or summary["pruned_raws"]

@@ -228,3 +228,63 @@ def archive_job_safe(
             "skipped": False,
             "error": f"archive_job_safe failed: {e}",
         }
+
+
+def archive_stats(archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict:
+    """Lee el archive y devuelve estadísticas agregadas para la UI.
+
+    Recorre cada subdirectorio del archive y suma tamaños + cuenta
+    correcciones. No abre los .npy (sólo `stat()`), así que es barato
+    incluso con cientos de jobs.
+
+    Returns:
+        Dict con:
+        - ``n_jobs``: número de subdirectorios con al menos un fichero.
+        - ``n_jobs_with_features``: subset con features.npy presente.
+        - ``total_bytes``: suma de tamaños de los ficheros archivados.
+        - ``n_corrections_total``: suma de líneas no vacías de los
+          ``corrections.jsonl``.
+        - ``last_archived_at``: timestamp epoch del fichero más reciente
+          en el archive (`None` si vacío).
+        - ``oldest_archived_at``: timestamp epoch del fichero más antiguo
+          (`None` si vacío).
+        - ``archive_dir``: ruta absoluta del archive como string.
+        - ``exists``: ``False`` si el directorio aún no existe (primer
+          uso del piloto).
+    """
+    result: dict = {
+        "archive_dir": str(archive_dir),
+        "exists": archive_dir.exists(),
+        "n_jobs": 0,
+        "n_jobs_with_features": 0,
+        "total_bytes": 0,
+        "n_corrections_total": 0,
+        "last_archived_at": None,
+        "oldest_archived_at": None,
+    }
+    if not archive_dir.exists():
+        return result
+
+    mtimes: list[float] = []
+    for job_dir in archive_dir.iterdir():
+        if not job_dir.is_dir() or job_dir.name.startswith("."):
+            continue
+        files = [p for p in job_dir.iterdir() if p.is_file()]
+        if not files:
+            continue
+        result["n_jobs"] += 1
+        for p in files:
+            st = p.stat()
+            result["total_bytes"] += st.st_size
+            mtimes.append(st.st_mtime)
+        if (job_dir / FEATURES_FILENAME).exists():
+            result["n_jobs_with_features"] += 1
+        corr = job_dir / CORRECTIONS_FILENAME
+        if corr.exists():
+            with corr.open() as f:
+                result["n_corrections_total"] += sum(1 for line in f if line.strip())
+
+    if mtimes:
+        result["last_archived_at"] = max(mtimes)
+        result["oldest_archived_at"] = min(mtimes)
+    return result
