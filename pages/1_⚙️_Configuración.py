@@ -151,7 +151,7 @@ manager = get_manager()
 
 st.subheader("Limpiar cola: borrar jobs DONE/FAILED")
 
-jobs = manager.list()
+jobs = manager.list_jobs()
 n_done = sum(1 for j in jobs if j.status in (JobStatus.DONE, JobStatus.FAILED))
 
 st.markdown(
