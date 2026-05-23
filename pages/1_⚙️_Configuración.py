@@ -20,8 +20,10 @@ modelo (Hito 5).
 
 from __future__ import annotations
 
+import io
 import shutil
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -38,6 +40,24 @@ st.set_page_config(
     page_icon="⚙️",
     layout="wide",
 )
+
+
+@st.cache_data(ttl=60, show_spinner="Comprimiendo archive…")
+def _make_archive_zip(archive_dir_str: str, _cache_key: tuple) -> bytes:
+    """Comprime archive_dir en .zip in-memory.
+
+    `_cache_key` agrupa stats del archive (n_jobs, total_bytes,
+    last_archived_at). Streamlit la usa como parte de la firma de
+    cache: cuando cambia (porque hay archive nuevo), regenera; cuando
+    es la misma, sirve la versión cacheada (~ms en vez de recompresar).
+    """
+    archive_dir = Path(archive_dir_str)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for p in sorted(archive_dir.rglob("*")):
+            if p.is_file():
+                zf.write(p, arcname=str(p.relative_to(archive_dir)))
+    return buf.getvalue()
 
 st.title("⚙️ Configuración")
 st.caption(
@@ -129,7 +149,26 @@ else:
     st.caption(
         f"Ruta en disco del host: `{stats['archive_dir']}`. Para llevar "
         "las correcciones al entorno de reentrenamiento, copia esta "
-        "carpeta vía USB cifrado o rsync."
+        "carpeta vía USB cifrado, rsync, o descarga el .zip de abajo."
+    )
+
+    # Export .zip descargable. Cache invalida cuando el archive cambia.
+    zip_bytes = _make_archive_zip(
+        stats["archive_dir"],
+        (stats["n_jobs"], stats["total_bytes"], stats["last_archived_at"]),
+    )
+    st.download_button(
+        label=f"📦 Descargar archive completo ({len(zip_bytes) / 1024 ** 2:.1f} MB .zip)",
+        data=zip_bytes,
+        file_name=f"dualpath-crc-archive-{datetime.now().strftime('%Y%m%d-%H%M')}.zip",
+        mime="application/zip",
+        help=(
+            "Comprime el contenido completo del archive (corrections.jsonl "
+            "+ features.npy + meta.json de cada job) en un único .zip. "
+            "Útil cuando la transferencia es por VPN/mail en vez de USB "
+            "físico. La compresión se cachea 60 s; si subes nuevas "
+            "correcciones, el zip se regenera automáticamente."
+        ),
     )
 
 
