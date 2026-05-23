@@ -31,6 +31,12 @@ set -euo pipefail
 MODE="on-demand"   # on-demand | spot | on-demand-then-spot
 ZONES=("europe-west4-a" "europe-west4-b" "europe-west4-c")
 
+# Nombre real del disco. Se setea en ensure_disk_in() a partir del nombre
+# encontrado (puede ser "${VM_NAME}" o "${VM_NAME}-<sufijo-zona>" heredado
+# de migraciones anteriores). Sin esta variable, el script asumía que el
+# disco se llama igual que la VM y fallaba al buscarlo si tenía sufijo.
+DISK_NAME=""
+
 for arg in "$@"; do
     case "$arg" in
         --spot) MODE="spot" ;;
@@ -66,31 +72,51 @@ vm_zone() {
 }
 
 disk_zone() {
-    # Si el disco existe, imprime su zona; si no, vacío.
-    gcloud compute disks list --filter="name=${VM_NAME}" --format="value(zone)" 2>/dev/null \
+    # Si el disco existe, imprime su zona. Acepta el nombre exacto
+    # "${VM_NAME}" o variantes "${VM_NAME}-<sufijo>" (legacy de
+    # migraciones anteriores donde el disco recreado se llamaba con
+    # sufijo de zona).
+    gcloud compute disks list \
+        --filter="name=${VM_NAME} OR name~^${VM_NAME}-" \
+        --format="value(zone)" 2>/dev/null \
         | head -1 | awk -F/ '{print $NF}'
+}
+
+disk_real_name() {
+    # Si el disco existe, imprime su nombre real (puede tener sufijo).
+    # Si no existe, vacío. Usado para acertar los gcloud disks {snapshot,
+    # delete} sobre el disco preexistente.
+    gcloud compute disks list \
+        --filter="name=${VM_NAME} OR name~^${VM_NAME}-" \
+        --format="value(name)" 2>/dev/null | head -1
 }
 
 find_existing_snapshot() {
     # Si hay un snapshot huc-pilot-snap-* del disco, lo devuelve.
+    # Reconoce snapshots de discos con o sin sufijo.
     gcloud compute snapshots list \
-        --filter="name~^huc-pilot-snap- AND sourceDisk~/${VM_NAME}$" \
+        --filter="name~^huc-pilot-snap- AND (sourceDisk~/${VM_NAME}$ OR sourceDisk~/${VM_NAME}-[^/]+$)" \
         --format="value(name)" 2>/dev/null | head -1
 }
 
 ensure_disk_in() {
     local target_zone="$1"
-    local current_zone
+    local current_zone current_name
     current_zone=$(disk_zone)
+    current_name=$(disk_real_name)
 
     if [[ "${current_zone}" == "${target_zone}" ]]; then
-        log "Disco ya está en ${target_zone} ✓"
+        log "Disco ya está en ${target_zone} ✓ (nombre real: ${current_name})"
+        DISK_NAME="${current_name}"
         return 0
     fi
 
-    # Caso 1: el disco vive en otra zona → snapshot + restore
+    # Caso 1: el disco vive en otra zona → snapshot + restore en target_zone.
+    # Aprovechamos para normalizar el nombre a "${VM_NAME}" (sin sufijo)
+    # tras la migración, ya que el script local crea siempre con ese
+    # nombre. Discos con sufijo "${VM_NAME}-<zona>" son legacy.
     if [[ -n "${current_zone}" ]]; then
-        log "Migrando disco de ${current_zone} → ${target_zone}"
+        log "Migrando disco ${current_name} (${current_zone}) → ${VM_NAME} (${target_zone})"
         local snap_name="huc-pilot-snap-roam-$(date +%s)"
 
         # Si el disco está atado a una VM, hay que borrar la VM primero (sin perder el disco)
@@ -101,18 +127,19 @@ ensure_disk_in() {
             gcloud compute instances delete "${VM_NAME}" --zone="${vm_z}" --keep-disks=boot --quiet
         fi
 
-        log "  snapshot del disco actual…"
-        gcloud compute disks snapshot "${VM_NAME}" --zone="${current_zone}" --snapshot-names="${snap_name}"
+        log "  snapshot del disco actual (${current_name})…"
+        gcloud compute disks snapshot "${current_name}" --zone="${current_zone}" --snapshot-names="${snap_name}"
 
-        log "  borrando disco viejo en ${current_zone}…"
-        gcloud compute disks delete "${VM_NAME}" --zone="${current_zone}" --quiet
+        log "  borrando disco viejo ${current_name} en ${current_zone}…"
+        gcloud compute disks delete "${current_name}" --zone="${current_zone}" --quiet
 
-        log "  creando disco nuevo en ${target_zone}…"
+        log "  creando disco nuevo ${VM_NAME} en ${target_zone}…"
         gcloud compute disks create "${VM_NAME}" --zone="${target_zone}" --source-snapshot="${snap_name}" --type=pd-ssd
 
         log "  borrando snapshot temporal…"
         gcloud compute snapshots delete "${snap_name}" --quiet
 
+        DISK_NAME="${VM_NAME}"
         return 0
     fi
 
@@ -124,8 +151,9 @@ ensure_disk_in() {
         return 1
     fi
 
-    log "Restaurando disco en ${target_zone} desde snapshot existente '${snap_name}'…"
+    log "Restaurando disco ${VM_NAME} en ${target_zone} desde snapshot existente '${snap_name}'…"
     gcloud compute disks create "${VM_NAME}" --zone="${target_zone}" --source-snapshot="${snap_name}" --type=pd-ssd
+    DISK_NAME="${VM_NAME}"
     return 0
 }
 
@@ -160,7 +188,7 @@ try_create_vm() {
         --address="${STATIC_IP_NAME}"
         --tags=http-server,https-server
         --maintenance-policy=TERMINATE
-        --disk="name=${VM_NAME},boot=yes,auto-delete=yes"
+        --disk="name=${DISK_NAME:-${VM_NAME}},boot=yes,auto-delete=yes"
     )
     if [[ "${provisioning}" == "spot" ]]; then
         cmd_args+=(--provisioning-model=SPOT --instance-termination-action=STOP)
@@ -197,7 +225,7 @@ apply_post_create() {
 
 log "Estado inicial:"
 log "  VM: $(vm_zone || echo '(no existe)')"
-log "  Disco: $(disk_zone || echo '(no existe)')"
+log "  Disco: $(disk_real_name || echo '(no existe)') en $(disk_zone || echo '(n/a)')"
 
 # Si la VM ya existe y está RUNNING, no hacemos nada
 existing_zone=$(vm_zone)
