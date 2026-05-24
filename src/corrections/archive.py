@@ -41,6 +41,7 @@ DEFAULT_ARCHIVE_DIR = Path(
 
 CORRECTIONS_FILENAME = "corrections.jsonl"
 FEATURES_FILENAME = "features.npy"
+PATCH_EVAL_FILENAME = "patch_eval.npz"
 META_FILENAME = "meta.json"
 
 
@@ -100,7 +101,9 @@ def archive_job(
     Returns:
         Dict con keys: ``job_id``, ``n_corrections`` (líneas no vacías),
         ``archived_corrections`` (bool: archive tiene el fichero al día),
-        ``archived_features`` (bool: idem), ``archived_meta`` (bool),
+        ``archived_features`` (bool: idem), ``archived_patch_eval``
+        (bool: idem; necesario para reconstruir targets de los parches
+        no corregidos al reentrenar Hito 2), ``archived_meta`` (bool),
         ``skipped`` (bool — sin corrections para archivar),
         ``error`` (str | None).
     """
@@ -110,6 +113,7 @@ def archive_job(
         "n_corrections": 0,
         "archived_corrections": False,
         "archived_features": False,
+        "archived_patch_eval": False,
         "archived_meta": False,
         "skipped": False,
         "error": None,
@@ -132,6 +136,7 @@ def archive_job(
     if dry_run:
         result["archived_corrections"] = True
         result["archived_features"] = (job_dir / FEATURES_FILENAME).exists()
+        result["archived_patch_eval"] = (job_dir / PATCH_EVAL_FILENAME).exists()
         result["archived_meta"] = (job_dir / META_FILENAME).exists()
         return result
 
@@ -164,7 +169,25 @@ def archive_job(
             result["error"] = f"archive features failed: {e}"
             return result
 
-    # 3. meta.json — overwrite siempre. Es pequeño y a veces se actualiza.
+    # 3. patch_eval.npz — predicciones patch-level del modelo
+    # (pred_index, pred_probs). Necesario para Hito 2: permite
+    # reconstruir el target de los parches NO corregidos por el
+    # patólogo (asumiendo "no corregido = aprobado implícitamente"
+    # según política metodológica a definir en Hito 2). Sin esto, al
+    # reentrenar solo tendríamos labels para los parches corregidos y
+    # perderíamos los cientos no tocados.
+    patch_eval_src = job_dir / PATCH_EVAL_FILENAME
+    if patch_eval_src.exists():
+        patch_eval_dst = job_archive_dir / PATCH_EVAL_FILENAME
+        try:
+            if not _files_identical(patch_eval_src, patch_eval_dst):
+                _copy_atomic(patch_eval_src, patch_eval_dst)
+            result["archived_patch_eval"] = True
+        except Exception as e:  # noqa: BLE001
+            result["error"] = f"archive patch_eval failed: {e}"
+            return result
+
+    # 4. meta.json — overwrite siempre. Es pequeño y a veces se actualiza.
     meta_src = job_dir / META_FILENAME
     if meta_src.exists():
         meta_dst = job_archive_dir / META_FILENAME
@@ -224,6 +247,7 @@ def archive_job_safe(
             "n_corrections": 0,
             "archived_corrections": False,
             "archived_features": False,
+            "archived_patch_eval": False,
             "archived_meta": False,
             "skipped": False,
             "error": f"archive_job_safe failed: {e}",
@@ -241,6 +265,9 @@ def archive_stats(archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict:
         Dict con:
         - ``n_jobs``: número de subdirectorios con al menos un fichero.
         - ``n_jobs_with_features``: subset con features.npy presente.
+        - ``n_jobs_with_patch_eval``: subset con patch_eval.npz presente
+          (necesario para reentrenamiento Hito 2; jobs sin este fichero
+          son legacy del archive antes de añadirlo).
         - ``total_bytes``: suma de tamaños de los ficheros archivados.
         - ``n_corrections_total``: suma de líneas no vacías de los
           ``corrections.jsonl``.
@@ -257,6 +284,7 @@ def archive_stats(archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict:
         "exists": archive_dir.exists(),
         "n_jobs": 0,
         "n_jobs_with_features": 0,
+        "n_jobs_with_patch_eval": 0,
         "total_bytes": 0,
         "n_corrections_total": 0,
         "last_archived_at": None,
@@ -279,6 +307,8 @@ def archive_stats(archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict:
             mtimes.append(st.st_mtime)
         if (job_dir / FEATURES_FILENAME).exists():
             result["n_jobs_with_features"] += 1
+        if (job_dir / PATCH_EVAL_FILENAME).exists():
+            result["n_jobs_with_patch_eval"] += 1
         corr = job_dir / CORRECTIONS_FILENAME
         if corr.exists():
             with corr.open() as f:

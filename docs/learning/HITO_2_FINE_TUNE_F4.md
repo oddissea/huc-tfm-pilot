@@ -31,7 +31,8 @@ muestras del §5.9 original) es la mitigación estándar.
 | Encoder BiT-M R50x1 congelado | parte del `F4Bundle` (no se toca en Hito 2) |
 | Head F4 (Linear 4096→512 + ReLU + Dropout + Linear 512→3) | `src/models/classifier.py::MLPClassifier` |
 | Features 512-d post-ReLU por parche | `archive/<job_id>/features.npy` (~2 KB/parche) |
-| Correcciones del patólogo | `archive/<job_id>/corrections.jsonl` (índices de parches + clase nueva) |
+| **Predicciones patch-level del modelo** (`pred_index`, `pred_probs`) | `archive/<job_id>/patch_eval.npz` |
+| Correcciones del patólogo | `archive/<job_id>/corrections.jsonl` (índices de parches corregidos + clase nueva) |
 | Metadatos del slide | `archive/<job_id>/meta.json` |
 | §5.9 dataset (91 slides clínicos) | `data_remote/` (SSD TIME) o reconstruible desde HDF5 originales |
 
@@ -42,6 +43,25 @@ muestras del §5.9 original) es la mitigación estándar.
 - Loop de fine-tune.
 - Detector de catastrophic forgetting.
 - UI que muestre versión activa del modelo (eso es Hito 5).
+- **Política de targets para parches NO corregidos**: ver §"Política de etiquetado" más abajo.
+
+### Política de etiquetado para parches no corregidos (decisión abierta)
+
+Cuando el patólogo corrige un slide, típicamente toca decenas de
+parches de los cientos que tiene el slide entero. Para reentrenar el
+head necesitamos un target por parche. Para los parches que el
+patólogo **no tocó**, hay tres opciones razonables:
+
+| Opción | Interpretación | Pros | Contras |
+|---|---|---|---|
+| **A — todas las predicciones como GT** | "No corregido = aprobado implícitamente" | Mucha señal (cientos de etiquetas por slide) | Amplifica errores del modelo si el patólogo no miró cada parche |
+| **B — solo correcciones explícitas** | Solo lo verificado vale como target | Conservador, sin errores propagados | Poca señal (decenas vs cientos), fine-tune debilucho |
+| **C — híbrido con sample weight** | Correcciones peso 1.0; no corregidas peso 0.3-0.5 | Mejor balance señal/ruido | Más complejo de implementar y reportar |
+
+Las tres opciones requieren tener `patch_eval.npz` archivado (que
+contiene `pred_index` por parche). Recomendación inicial: **empezar
+con C** y reportar resultados con ablation A vs B vs C para
+calibrar.
 
 ## Alcance del fine-tune: decisión de diseño abierta
 

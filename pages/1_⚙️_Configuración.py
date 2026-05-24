@@ -128,11 +128,20 @@ if not stats["exists"] or stats["n_jobs"] == 0:
         "el worker dispare el prune."
     )
 else:
-    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a, col_b, col_c, col_d, col_e = st.columns(5)
     col_a.metric("Jobs archivados", stats["n_jobs"])
     col_b.metric("Con features 512-d", stats["n_jobs_with_features"])
-    col_c.metric("Correcciones totales", stats["n_corrections_total"])
-    col_d.metric("Tamaño en disco", f"{stats['total_bytes'] / 1024 ** 2:.1f} MB")
+    col_c.metric(
+        "Con patch_eval",
+        stats.get("n_jobs_with_patch_eval", 0),
+        help=(
+            "Jobs con patch_eval.npz archivado (predicciones del modelo "
+            "por parche). Necesario para reentrenamiento Hito 2; jobs "
+            "legacy archivados antes pueden no tenerlo."
+        ),
+    )
+    col_d.metric("Correcciones totales", stats["n_corrections_total"])
+    col_e.metric("Tamaño en disco", f"{stats['total_bytes'] / 1024 ** 2:.1f} MB")
 
     col_e, col_f = st.columns(2)
     with col_e:

@@ -31,18 +31,30 @@ vía comparación directa de sha256 entre `job_dir` y el archive.
 ## Qué se archiva
 
 Por cada `job_dir` con al menos una corrección no vacía en
-`corrections.jsonl`, se copian al archive estos tres ficheros:
+`corrections.jsonl`, se copian al archive estos cuatro ficheros:
 
-| Fichero            | Contenido                                          | Bloqueante |
-|--------------------|----------------------------------------------------|------------|
-| `corrections.jsonl`| Etiquetas que el patólogo corrigió post-inferencia | sí         |
-| `features.npy`     | Embeddings 512-d (post-ReLU) por parche del slide  | sí         |
-| `meta.json`        | Filename, n_patches, predicted_class, timestamps   | no         |
+| Fichero            | Contenido                                                                     | Bloqueante |
+|--------------------|-------------------------------------------------------------------------------|------------|
+| `corrections.jsonl`| Etiquetas que el patólogo corrigió post-inferencia (solo parches modificados) | sí         |
+| `features.npy`     | Embeddings 512-d (post-ReLU) por parche del slide                             | sí         |
+| `patch_eval.npz`   | Predicciones patch-level del modelo (`pred_index`, `pred_probs`) por parche   | sí         |
+| `meta.json`        | Filename, n_patches, predicted_class, timestamps                              | no         |
 
 Bloqueante = si la copia falla, el `job_dir` NO se borra; se reintenta.
 
 Jobs sin `corrections.jsonl` o con el fichero vacío se ignoran: no
 existe señal supervisada que justifique conservarlos.
+
+**Por qué `patch_eval.npz` también**: en Hito 2 (reentrenamiento del
+head F4 con replay buffer), las correcciones explícitas del patólogo
+son típicamente decenas de parches por slide, pero el slide tiene
+cientos. Para reentrenar bien necesitamos el target de **todos** los
+parches, no solo los corregidos. Las predicciones del modelo
+guardadas en `patch_eval.npz` permiten reconstruir el target de los
+parches "no tocados" bajo distintas políticas (asumir "no corregido
+= aprobado" como ground truth fuerte, o con peso reducido tipo soft
+label). La política exacta se decide en Hito 2; archivamos siempre
+el fichero para no cerrar opciones.
 
 ## Requisitos en el host de producción (HUC)
 
