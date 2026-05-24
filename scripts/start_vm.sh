@@ -249,6 +249,12 @@ if [[ -n "${existing_zone}" ]]; then
         fi
         if grep -q "ZONE_RESOURCE_POOL_EXHAUSTED" /tmp/vm_start.log; then
             log "Start falló por stockout. Probando otras zonas…"
+            # Antes del loop de zonas: borrar la VM TERMINATED (manteniendo
+            # el disco). Si no la borramos, try_create_vm() del loop fallará
+            # con "instance already exists" porque tratará de recrearla en
+            # cualquier zona aunque siga viva en ${existing_zone}.
+            log "Borrando VM en ${existing_zone} (manteniendo disco) para liberar el nombre…"
+            gcloud compute instances delete "${VM_NAME}" --zone="${existing_zone}" --keep-disks=boot --quiet || true
         fi
     fi
 fi
