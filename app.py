@@ -9,6 +9,7 @@ en M4.5.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -202,7 +203,32 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🩺 DualPath CRC — by Lumen Network")
+# Estetoscopio como SVG inline (no emoji): el navegador lo dibuja como
+# imagen, idéntico en Mac/Windows/Linux. Evita la lotería de la fuente
+# emoji del SO (Apple Color Emoji / Segoe UI Emoji / Noto, o tofu si
+# falta la fuente en Ubuntu). Trazo en el acento de marca #7A5A3F.
+_STETHO_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' "
+    "viewBox='0 0 24 24' fill='none' stroke='#7A5A3F' stroke-width='2' "
+    "stroke-linecap='round' stroke-linejoin='round' style='flex:0 0 auto;'>"
+    "<path d='M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 "
+    "6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3'/>"
+    "<path d='M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4'/>"
+    "<circle cx='20' cy='10' r='2'/>"
+    "</svg>"
+)
+_STETHO_DATA_URI = (
+    "data:image/svg+xml;base64,"
+    + base64.b64encode(_STETHO_SVG.encode("utf-8")).decode("ascii")
+)
+st.markdown(
+    "<h1 style='display:flex; align-items:center; gap:0.6rem;'>"
+    f"<img src='{_STETHO_DATA_URI}' width='40' height='40' "
+    "style='flex:0 0 auto;' alt='estetoscopio'>"
+    "<span>DualPath CRC — by Lumen Network</span>"
+    "</h1>",
+    unsafe_allow_html=True,
+)
 st.markdown(
     "<p style='font-style: italic; color: #261B17; opacity: 0.85; "
     "margin-top: -0.5rem; margin-bottom: 0.3rem; font-size: 1.05rem;'>"
