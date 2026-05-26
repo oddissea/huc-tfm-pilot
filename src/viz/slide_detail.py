@@ -486,7 +486,15 @@ def _render_openseadragon_viewer(
     """
     if not job.dzi_path.exists():
         return None
-    dzi_url = f"/dzi/{job.job_id}/slide.dzi"
+    # DZI_BASE_URL puede sobreescribir el prefijo del URL del DZI:
+    # - Por defecto "/dzi" → URL relativa `/dzi/<job>/slide.dzi`,
+    #   asumiendo nginx delante haciendo alias `/dzi/` → `/var/www/dzi/`
+    #   (despliegue cloud con docker compose + nginx).
+    # - HUC PC sin nginx (deploy "sin compose"): setear
+    #   `DZI_BASE_URL=http://localhost:8888` → URL absoluta al sidecar
+    #   `serve_dzi.py` corriendo en el mismo container (puerto 8888).
+    _dzi_base = os.environ.get("DZI_BASE_URL", "/dzi")
+    dzi_url = f"{_dzi_base}/{job.job_id}/slide.dzi"
 
     # Cargar correcciones existentes para mostrar marcador distintivo
     # en el visor sobre los parches ya corregidos. Deduplicado last-wins

@@ -69,6 +69,7 @@ docker run -d \
   --name huc-pilot \
   --gpus all \
   -p 8501:8501 \
+  -p 8888:8888 \
   -v ~/huc-pilot-data/archive:/var/archive \
   -v ~/huc-pilot-data/queue:/tmp/queue \
   --restart unless-stopped \
@@ -78,8 +79,10 @@ docker run -d \
 docker ps
 ```
 
-→ Debe aparecer una línea con `huc-pilot` en estado `Up X seconds`,
-puerto `0.0.0.0:8501->8501/tcp`.
+→ Debe aparecer una línea con `huc-pilot` en estado `Up X seconds` y
+**ambos puertos** mapeados: `0.0.0.0:8501->8501/tcp` (Streamlit) y
+`0.0.0.0:8888->8888/tcp` (servidor interno de tiles del visor
+OpenSeadragon).
 
 ### 1.8 (opcional) — Liberar 4,4 GB del home
 
@@ -165,7 +168,8 @@ Equivalente a `stop` + `start` en un comando.
 | `sha256sum: FAILED` | Descarga corrupta | Volver a descargar el `.tar.gz` |
 | `Cannot connect to the Docker daemon` | Docker daemon no arrancado | `sudo systemctl start docker` |
 | `Could not select device driver "nvidia"` | NVIDIA Container Toolkit mal configurado | Avisar a Nasser |
-| `bind: address already in use` (puerto 8501) | Otro proceso usa el puerto | `docker stop huc-pilot` y reintentar, o `lsof -i :8501` para ver qué lo ocupa |
+| `bind: address already in use` (puerto 8501 u 8888) | Otro proceso usa el puerto | `docker stop huc-pilot` y reintentar, o `lsof -i :8501` / `lsof -i :8888` para ver qué lo ocupa |
+| `Unable to open [object Object]: Unable to load TileSource` en el visor | El sidecar de tiles (puerto 8888) no responde | Verifica con `docker ps` que aparece `0.0.0.0:8888->8888/tcp`. Si falta, el container se lanzó sin `-p 8888:8888` — reintentar el `docker run` con esa flag |
 | `out of disk space` | Sin espacio para la imagen (~14 GB tras `docker load`) | Liberar espacio en `~` |
 | `docker: Error response from daemon: ... already in use by container` | Hay un container viejo con ese nombre | `docker rm huc-pilot` y reintentar el `docker run` |
 | `Permission denied (write)` al hacer `mkdir` | Permisos en `~` | Verifica que el directorio home es tuyo: `ls -ld ~` |
@@ -207,6 +211,7 @@ docker run -d \
   --name huc-pilot \
   --gpus all \
   -p 8501:8501 \
+  -p 8888:8888 \
   -v ~/huc-pilot-data/archive:/var/archive \
   -v ~/huc-pilot-data/queue:/tmp/queue \
   --restart unless-stopped \

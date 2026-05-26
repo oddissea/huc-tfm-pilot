@@ -19,6 +19,12 @@ services:
       # preserva correcciones + features pase lo que pase. Para
       # cambiarlo descomentar la línea siguiente:
       #PILOT_TTL_HOURS: "168"
+      # URL base del servidor de DZIs. En el despliegue cloud con nginx
+      # delante, usamos URL relativa `/dzi` y nginx la sirve via
+      # `alias /dzi/ → /var/www/dzi/`. Esto sobreescribe el default
+      # `http://localhost:8888` que la imagen pone para el deploy HUC
+      # PC sin nginx (sidecar serve_dzi.py).
+      DZI_BASE_URL: /dzi
     restart: unless-stopped
     volumes:
       # Cache de pesos del modelo (~151 MB, F4 + 5 AttnMIL). Persistencia

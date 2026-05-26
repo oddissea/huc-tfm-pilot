@@ -39,11 +39,23 @@ COPY app.py .
 # contiene ⚙️ Configuración para auto-servicio del operador.
 COPY pages/ ./pages/
 
-# CLI scripts (archive_jobs, etc.). Permite invocar
+# CLI scripts (archive_jobs, serve_dzi, entrypoint, ...). Permite invocar
 # `docker compose exec app python -m scripts.archive_jobs` desde cron en
 # el host de producción (red de seguridad del hook del worker).
 COPY scripts/ ./scripts/
+RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/serve_dzi.py
 
-EXPOSE 8501
+# Por defecto el visor OpenSeadragon apunta al sidecar serve_dzi.py en
+# http://localhost:8888. Útil para despliegue HUC PC sin nginx (un solo
+# container, dos procesos internos). En despliegue cloud con nginx
+# delante (docker compose), overridear con `-e DZI_BASE_URL=/dzi` para
+# que la URL quede relativa y nginx la resuelva vía
+# `alias /dzi/ → /var/www/dzi/`.
+ENV DZI_BASE_URL=http://localhost:8888
 
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+EXPOSE 8501 8888
+
+# Entrypoint lanza serve_dzi.py en background (sirve tiles DZI con CORS
+# en :8888) + streamlit en foreground (:8501). Si streamlit muere, el
+# container termina y `--restart unless-stopped` lo relanza limpio.
+CMD ["/app/scripts/entrypoint.sh"]
