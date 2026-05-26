@@ -41,8 +41,8 @@ Ruta: `Releases/DualPath-CRC/v1.0.1/`.
 
 | Fichero | FILE_ID | URL |
 |---|---|---|
-| `huc-pilot-with-weights-v1.0.1.tar.gz` | _(pendiente subir)_ | _(pendiente)_ |
-| `huc-pilot-with-weights-v1.0.1.tar.gz.sha256` | _(pendiente subir)_ | _(pendiente)_ |
+| `huc-pilot-with-weights-v1.0.1.tar.gz` | `1n03IPOxLsoyyAWxai2bc7W4l2dWIG5rY` | https://drive.google.com/file/d/1n03IPOxLsoyyAWxai2bc7W4l2dWIG5rY/view |
+| `huc-pilot-with-weights-v1.0.1.tar.gz.sha256` | `1AT4RHKKA79RtmJESEyUdnAp3ppO4UhOM` | https://drive.google.com/file/d/1AT4RHKKA79RtmJESEyUdnAp3ppO4UhOM/view |
 
 ### Cambio para el `docker run` de Eduardo (vs v1.0)
 
@@ -76,12 +76,12 @@ sección 4).
 
    (Los datos en `~/huc-pilot-data/` se conservan automáticamente).
 
-2. Descargar nueva versión (FILE_IDs pendientes de subir al Drive):
+2. Descargar nueva versión desde el Shared Drive:
 
    ```
    cd ~
-   gdown "<NUEVO_TAR_ID>" -O huc-pilot-with-weights.tar.gz
-   gdown "<NUEVO_SHA_ID>" -O huc-pilot-with-weights.tar.gz.sha256
+   gdown "1n03IPOxLsoyyAWxai2bc7W4l2dWIG5rY" -O huc-pilot-with-weights.tar.gz
+   gdown "1AT4RHKKA79RtmJESEyUdnAp3ppO4UhOM" -O huc-pilot-with-weights.tar.gz.sha256
    sha256sum -c huc-pilot-with-weights.tar.gz.sha256
    ```
 
