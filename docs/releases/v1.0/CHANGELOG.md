@@ -47,15 +47,20 @@ servicio de Anatomía Patológica, Hospital Universitario de Canarias).
 
 ### Despliegue
 
-Ver `USER_GUIDE_EDUARDO.md` (en el repo `huc-tfm-pilot`).
+Ver `USER_GUIDE_EDUARDO.md` (este mismo Shared Drive lo aloja en la
+carpeta `Documentation/`, o también está en el repo público
+`huc-tfm-pilot`).
 
-Resumen rápido:
+Resumen rápido del flujo sin clonar el repo (autosuficiente con esta
+imagen):
 
-1. Descargar `huc-pilot-with-weights.tar.gz` + `.sha256` de este
-   Shared Drive.
-2. Verificar integridad con `sha256sum -c`.
-3. Ejecutar `bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh <ruta>`.
-4. Abrir `http://localhost:8501` en navegador.
+1. Instalar `gdown` con `pipx install gdown`.
+2. Descargar `huc-pilot-with-weights.tar.gz` + `.sha256` desde el
+   Shared Drive con `gdown` (FILE_IDs abajo).
+3. Verificar integridad con `sha256sum -c`.
+4. `docker load -i ...` + `docker tag ... huc-pilot:dev`.
+5. `docker run -d --gpus all -p 8501:8501 -v ~/huc-pilot-data/archive:/var/archive -v ~/huc-pilot-data/queue:/tmp/queue --restart unless-stopped --name huc-pilot huc-pilot:dev`.
+6. Abrir `http://localhost:8501` en navegador.
 
 ### Tamaños
 
@@ -72,14 +77,23 @@ Ruta: `Releases/DualPath-CRC/v1.0/`.
 | `huc-pilot-with-weights.tar.gz` | `1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0` | https://drive.google.com/file/d/1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0/view |
 | `huc-pilot-with-weights.tar.gz.sha256` | `1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI` | https://drive.google.com/file/d/1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI/view |
 
-Comando recomendado para Eduardo (HUC PC, Ubuntu):
+Comando recomendado para Eduardo (HUC PC, Ubuntu, sin clonar repo):
 
 ```bash
-cd ~/huc-tfm-pilot/
+sudo apt install -y pipx
+pipx install gdown
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p ~/huc-pilot-data/archive ~/huc-pilot-data/queue
+cd ~
 gdown "1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0" -O huc-pilot-with-weights.tar.gz
 gdown "1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI" -O huc-pilot-with-weights.tar.gz.sha256
 sha256sum -c huc-pilot-with-weights.tar.gz.sha256
-bash pilot/scripts/huc-deploy.sh huc-pilot-with-weights.tar.gz
+docker load -i huc-pilot-with-weights.tar.gz
+docker tag huc-pilot:dev-with-weights huc-pilot:dev
+docker run -d --name huc-pilot --gpus all -p 8501:8501 \
+  -v ~/huc-pilot-data/archive:/var/archive \
+  -v ~/huc-pilot-data/queue:/tmp/queue \
+  --restart unless-stopped huc-pilot:dev
 ```
 
 ### Limitaciones conocidas

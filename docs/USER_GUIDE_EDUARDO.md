@@ -15,146 +15,75 @@ El ordenador del HUC ya debe tener instalado (validado contigo el
 - **Driver NVIDIA 580.159.03** + CUDA 13.0.
 - **NVIDIA Container Toolkit 1.19.1**.
 
-**Cómo verificar que todo está listo**: abre terminal y ejecuta:
+### Cómo verificar que todo sigue OK
 
 ```
 docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 
-→ Si responde con una tabla mostrando tu **RTX 5070**, todo OK, sigue
-a la sección 1.
+→ Debe imprimir una tabla con tu **RTX 5070**, `Driver Version:
+580.xx`, `CUDA Version: 13.0` y procesos vacíos.
 
-→ Si dice `Could not select device driver "nvidia"` o `'docker' no se
-reconoce` → **avísame** antes de continuar.
+Si en lugar de la tabla sale `Could not select device driver "nvidia"`
+o `'docker' no se reconoce` → **avísame** antes de continuar.
 
-## 1. Descargar la imagen del piloto desde Google Drive
+## 1. Deploy inicial — un único bloque copy-paste
 
-La imagen Docker (`huc-pilot-with-weights.tar.gz`, ~4,4 GB) está
-alojada en el Shared Drive de Lumen Network. Te he compartido la
-subcarpeta `Releases/DualPath-CRC/v1.0/` con permiso de lector. Tienes
-el link en el correo (o lo pides por WhatsApp).
-
-Hay dos formas de descargarla: la **A** es la más sencilla (clic en
-navegador), la **B** es scripteable y la recomendada si vas a
-actualizar versiones en el futuro.
-
-### Opción A — Descarga manual desde navegador
-
-1. Abre el link de Google Drive en Firefox o Chrome.
-2. Sobre el fichero `huc-pilot-with-weights.tar.gz`, clic derecho →
-   **"Descargar"**.
-3. Google avisa de "No se puede analizar virus, ¿continuar?" → confirma.
-4. Espera 5-15 min (depende de la red del HUC; son ~4,4 GB).
-5. Descarga también el fichero `huc-pilot-with-weights.tar.gz.sha256`
-   de la misma carpeta (~100 bytes, instantáneo).
-6. Mueve ambos a `~/huc-tfm-pilot/`:
+Abre terminal y pega los comandos siguientes (todos a la vez o uno a
+uno, ambas formas funcionan):
 
 ```
-mv ~/Descargas/huc-pilot-with-weights.tar.gz* ~/huc-tfm-pilot/
-cd ~/huc-tfm-pilot/
-```
+# 1.1. Instalar gdown (para descargar la imagen desde Google Drive)
+sudo apt install -y pipx
+pipx install gdown
+export PATH="$HOME/.local/bin:$PATH"
 
-### Opción B — Descarga scripteable con `gdown`
+# 1.2. Crear directorios de datos persistentes
+#      Aquí guardará el piloto las correcciones del patólogo y la cola
+#      de jobs procesados. Sobreviven aunque pares/elimines el container.
+mkdir -p ~/huc-pilot-data/archive ~/huc-pilot-data/queue
 
-Útil si vas a actualizar a versiones futuras o no quieres usar
-navegador. Requiere `gdown` (instalación una vez, 30 s):
+# 1.3. Descargar la imagen Docker y su checksum desde el Shared Drive
+#      de Lumen Network. La imagen son ~4,4 GB → tarda 5-15 min según
+#      la conexión del HUC. El .sha256 son 96 bytes, instantáneo.
+cd ~
+gdown "1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0" -O huc-pilot-with-weights.tar.gz
+gdown "1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI" -O huc-pilot-with-weights.tar.gz.sha256
 
-```
-sudo apt install -y python3-pip
-pip install gdown
-```
-
-Luego, con el **ID del fichero** que te paso por separado:
-
-```
-cd ~/huc-tfm-pilot/
-gdown --fuzzy "https://drive.google.com/file/d/<FILE_ID>/view" -O huc-pilot-with-weights.tar.gz
-gdown --fuzzy "https://drive.google.com/file/d/<SHA_ID>/view" -O huc-pilot-with-weights.tar.gz.sha256
-```
-
-(Te enviaré `<FILE_ID>` y `<SHA_ID>` por separado, no van en este doc.)
-
-### Verificar integridad
-
-Una vez descargado, asegúrate de que el fichero no se corrompió:
-
-```
+# 1.4. Verificar integridad del fichero (tarda 30-60 segundos)
 sha256sum -c huc-pilot-with-weights.tar.gz.sha256
 ```
 
-→ Debe imprimir: `huc-pilot-with-weights.tar.gz: OK`
+→ La última línea debe imprimir: `huc-pilot-with-weights.tar.gz: OK`
 
-Si dice `FAILED`, vuelve a descargar (la red del HUC puede haber
-cortado).
-
-## 2. Despliegue: opción atajo o paso a paso
-
-### Atajo — un único comando
-
-Si todo lo anterior está correcto, ejecuta el wrapper:
+Si dice `FAILED`, vuelve a ejecutar la descarga (la red del HUC pudo
+haber cortado en medio).
 
 ```
-bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh ~/huc-tfm-pilot/huc-pilot-with-weights.tar.gz
-```
-
-El script hace los 4 pasos manuales (verificación + load + tag +
-`docker compose up`) en una sola invocación, con progreso visible.
-Termina con un mensaje verde **"✅ Despliegue completo"** y la app
-accesible en `http://localhost:8501`.
-
-**Alternativa moderna del script** — si quieres que el script también
-descargue de Drive (no solo cargue un fichero local):
-
-```
-bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh "https://drive.google.com/file/d/<FILE_ID>/view"
-```
-
-El script detecta que es un link de Drive, descarga + verifica +
-carga. Útil para actualizaciones futuras: un solo comando, recibes
-link nuevo, lo lanzas. Requiere `gdown` instalado (ver §1.B).
-
-### Paso a paso (versión larga, recomendada la primera vez)
-
-Si prefieres ir comando por comando para entender qué hace cada uno:
-
-```
-# 2.1. Cargar la imagen al daemon Docker (tarda 2-5 min)
-cd ~/huc-tfm-pilot/
+# 1.5. Cargar la imagen al daemon Docker (tarda 2-5 minutos)
 docker load -i huc-pilot-with-weights.tar.gz
-```
-
-→ Debe terminar con: `Loaded image: huc-pilot:dev-with-weights`
-
-```
-# 2.2. Renombrar la imagen (para que docker compose la reconozca)
 docker tag huc-pilot:dev-with-weights huc-pilot:dev
+
+# 1.6. Lanzar el container
+docker run -d \
+  --name huc-pilot \
+  --gpus all \
+  -p 8501:8501 \
+  -v ~/huc-pilot-data/archive:/var/archive \
+  -v ~/huc-pilot-data/queue:/tmp/queue \
+  --restart unless-stopped \
+  huc-pilot:dev
+
+# 1.7. Confirmar que arrancó
+docker ps
 ```
 
-→ Sin salida. Es normal.
+→ Debe aparecer una línea con `huc-pilot` en estado `Up X seconds`,
+puerto `0.0.0.0:8501->8501/tcp`.
 
-```
-# 2.3. Levantar todos los servicios en segundo plano
-cd ~/huc-tfm-pilot/pilot
-docker compose up -d
-```
+## 2. Abrir y usar el piloto
 
-→ Tres líneas tipo `Container huc-pilot-XXX Started`.
-
-```
-# 2.4. Comprobar que arrancó bien (espera 10 segundos antes)
-sleep 10
-docker compose logs app --tail=20
-```
-
-→ Debes ver al final del log: `You can now view your Streamlit app in
-your browser.` y `URL: http://0.0.0.0:8501`.
-
-Si el log muestra **errores rojos**, hazme una captura entera y
-mándamela.
-
-## 3. Abrir y usar el piloto
-
-Abre Firefox y ve a:
+Abre Firefox o Chrome y ve a:
 
 ```
 http://localhost:8501
@@ -169,55 +98,106 @@ A partir de aquí, sigue el flujo habitual que ya conoces:
 4. Hacer correcciones en el visor.
 
 Para la **página `⚙️ Configuración`**, consulta `QA_EDUARDO.md` —
-explica TTL, estado del archive y acciones.
+explica TTL, estado del archive y acciones (puedo enviártelo por
+WhatsApp).
 
-## 4. Apagar al final de la jornada (opcional pero recomendado)
+## 3. Comandos diarios
 
-Para no dejar el container corriendo durante la noche:
+### Apagar al final de la jornada
 
 ```
-cd ~/huc-tfm-pilot/pilot
-docker compose down
+docker stop huc-pilot
 ```
 
-La próxima vez que quieras usar el piloto, solo necesitas repetir
-**`docker compose up -d`** (la imagen ya está cargada en Docker desde
-el primer deploy).
+Solo para el container, no borra nada. Las correcciones y jobs
+quedan a salvo en `~/huc-pilot-data/`.
 
-## 5. Si algo falla — errores típicos
+### Volver a arrancar al día siguiente
+
+```
+docker start huc-pilot
+```
+
+Reanuda el container con todo su estado. La app vuelve a estar
+accesible en `http://localhost:8501` en pocos segundos.
+
+### Ver logs en tiempo real
+
+```
+docker logs -f huc-pilot
+```
+
+Sale con `Ctrl+C`. Útil si la app no responde y quieres ver qué
+está pasando.
+
+### Reiniciar el container si se queda colgado
+
+```
+docker restart huc-pilot
+```
+
+Equivalente a `stop` + `start` en un comando.
+
+## 4. Si algo falla — errores típicos
 
 | Mensaje exacto | Qué pasa | Qué hacer |
 |---|---|---|
 | `'docker' no se reconoce` o `command not found` | Docker no instalado | Avisar a Nasser |
-| `sha256sum: FAILED` | Descarga corrupta | Volver a descargar |
+| `gdown: command not found` | gdown no instalado | Reintentar `pipx install gdown && export PATH="$HOME/.local/bin:$PATH"` |
+| `error: externally-managed-environment` al hacer `pip install gdown` | Ubuntu 24.04 protege Python sistema | Usa `pipx install gdown` en lugar de `pip install gdown` |
+| `sha256sum: FAILED` | Descarga corrupta | Volver a descargar el `.tar.gz` |
 | `Cannot connect to the Docker daemon` | Docker daemon no arrancado | `sudo systemctl start docker` |
 | `Could not select device driver "nvidia"` | NVIDIA Container Toolkit mal configurado | Avisar a Nasser |
-| `bind: address already in use` | Puerto 80/443/8501 ocupado | `docker compose down` y reintentar |
-| `out of disk space` | Sin espacio para la imagen (~14 GB) | Liberar espacio en `~` |
-| `gdown: command not found` | `gdown` no instalado | `pip install gdown` |
-| `Permission denied (write)` al hacer `mv` | Permisos en `~/huc-tfm-pilot/` | Verifica que la carpeta es tuya: `chown -R eduardo:eduardo ~/huc-tfm-pilot/` |
+| `bind: address already in use` (puerto 8501) | Otro proceso usa el puerto | `docker stop huc-pilot` y reintentar, o `lsof -i :8501` para ver qué lo ocupa |
+| `out of disk space` | Sin espacio para la imagen (~14 GB tras `docker load`) | Liberar espacio en `~` |
+| `docker: Error response from daemon: ... already in use by container` | Hay un container viejo con ese nombre | `docker rm huc-pilot` y reintentar el `docker run` |
+| `Permission denied (write)` al hacer `mkdir` | Permisos en `~` | Verifica que el directorio home es tuyo: `ls -ld ~` |
 
 Si el mensaje **no es ninguno de estos**, hazme una captura entera
 del terminal (con el comando que ejecutaste arriba y el error abajo)
-y mándamela.
+y mándamela por WhatsApp.
 
-## 6. Cuando llegue una versión nueva del modelo (post-defensa)
+## 5. Cuando llegue una versión nueva del modelo (post-defensa)
 
 Después de la defensa, cuando reentrenemos el modelo con las
 correcciones acumuladas (Hito 2 del módulo de aprendizaje), te
-mandaré por WhatsApp el **link nuevo de Drive** apuntando a la nueva
-versión (`Releases/DualPath-CRC/v1.1/`, etc.).
+mandaré por WhatsApp:
 
-El procedimiento de actualización es **idéntico al de la primera
-vez**: descargas (manual o con `gdown`), verificas sha256, ejecutas
-`huc-deploy.sh` apuntando al nuevo `.tar.gz`. Docker reemplaza la
-imagen vieja automáticamente; no hace falta desinstalar nada.
+- Los nuevos **FILE_IDs** del `.tar.gz` y `.sha256` (cambian con cada
+  versión).
+- Un link al `CHANGELOG.md` del Shared Drive con qué incluye la
+  versión nueva.
 
-**Atajo moderno** — si tienes `gdown` instalado, una sola línea:
+El procedimiento de actualización es:
 
 ```
-bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh "<LINK_NUEVO_DRIVE>"
+# Eliminar el container viejo (las correcciones en ~/huc-pilot-data/
+# se conservan automáticamente).
+docker stop huc-pilot
+docker rm huc-pilot
+
+# Descargar nueva versión (sustituye <NUEVO_TAR_ID> y <NUEVO_SHA_ID>
+# por los que te pasaré).
+cd ~
+gdown "<NUEVO_TAR_ID>" -O huc-pilot-with-weights.tar.gz
+gdown "<NUEVO_SHA_ID>" -O huc-pilot-with-weights.tar.gz.sha256
+sha256sum -c huc-pilot-with-weights.tar.gz.sha256
+
+# Cargar y relanzar
+docker load -i huc-pilot-with-weights.tar.gz
+docker tag huc-pilot:dev-with-weights huc-pilot:dev
+docker run -d \
+  --name huc-pilot \
+  --gpus all \
+  -p 8501:8501 \
+  -v ~/huc-pilot-data/archive:/var/archive \
+  -v ~/huc-pilot-data/queue:/tmp/queue \
+  --restart unless-stopped \
+  huc-pilot:dev
 ```
+
+Los volúmenes `archive/` y `queue/` se reusan automáticamente entre
+versiones, así que las correcciones que hiciste antes siguen ahí.
 
 ## Contacto
 
