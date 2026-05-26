@@ -63,6 +63,25 @@ Resumen rápido:
 - Imagen Docker descomprimida: ~14 GB.
 - Requiere ~20 GB libres en disco para el load inicial.
 
+### Distribución — Google Drive (Shared Drive "Lumen Network")
+
+Ruta: `Releases/DualPath-CRC/v1.0/`.
+
+| Fichero | FILE_ID | URL |
+|---|---|---|
+| `huc-pilot-with-weights.tar.gz` | `1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0` | https://drive.google.com/file/d/1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0/view |
+| `huc-pilot-with-weights.tar.gz.sha256` | `1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI` | https://drive.google.com/file/d/1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI/view |
+
+Comando recomendado para Eduardo (HUC PC, Ubuntu):
+
+```bash
+cd ~/huc-tfm-pilot/
+gdown "1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0" -O huc-pilot-with-weights.tar.gz
+gdown "1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI" -O huc-pilot-with-weights.tar.gz.sha256
+sha256sum -c huc-pilot-with-weights.tar.gz.sha256
+bash pilot/scripts/huc-deploy.sh huc-pilot-with-weights.tar.gz
+```
+
 ### Limitaciones conocidas
 
 - **Tarea ternaria a nivel de parche** (normal / adenoma / carcinoma).
