@@ -1,100 +1,148 @@
 # Guía de despliegue del piloto en el HUC
 
 Eduardo, esta guía te explica paso a paso cómo arrancar el piloto
-**DualPath CRC — by Lumen Network** en el ordenador del HUC, una vez
-recibido el USB con el paquete. Está pensada para que la sigas tú
-solo; si en algún paso te atascas, llámame.
+**DualPath CRC — by Lumen Network** en el ordenador del HUC. Está
+pensada para que la sigas tú solo; si en algún paso te atascas,
+llámame.
 
-## Antes de empezar — prerrequisito (lo hace IT del HUC o Nasser)
+## Antes de empezar — prerrequisito (instalado en sesión previa)
 
-Esta guía asume que el ordenador del HUC ya tiene instalado:
+El ordenador del HUC ya debe tener instalado (validado contigo el
+2026-05-25):
 
-- Docker Desktop (o Docker CE en WSL2).
-- NVIDIA Container Toolkit (para que Docker hable con la GPU RTX 5070).
-- Acceso a un terminal (PowerShell o WSL2 bash).
+- **Ubuntu 24.04** nativo.
+- **Docker CE 29.4.3** + Compose v5.1.3.
+- **Driver NVIDIA 580.159.03** + CUDA 13.0.
+- **NVIDIA Container Toolkit 1.19.1**.
 
-**Cómo saber si está listo**: abre PowerShell y escribe:
+**Cómo verificar que todo está listo**: abre terminal y ejecuta:
 
-```bash
-docker info
+```
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 
-- Si responde con un montón de información sobre versión, GPU, etc.
-  → **listo**, sigue a la sección 1.
-- Si dice `'docker' no se reconoce como un comando...` o sale otro
-  error → **avísame** (o a IT del HUC) antes de continuar. La
-  instalación inicial requiere reiniciar Windows y configurar
-  permisos; no es algo que debas hacer tú solo.
+→ Si responde con una tabla mostrando tu **RTX 5070**, todo OK, sigue
+a la sección 1.
 
-## 1. Cargar la imagen del piloto desde el USB
+→ Si dice `Could not select device driver "nvidia"` o `'docker' no se
+reconoce` → **avísame** antes de continuar.
 
-Conecta el USB cifrado al ordenador. Asume que Windows lo monta como
-unidad **`D:`** (puede ser `E:`, `F:`, etc.; ajusta los comandos si es
-otra letra).
+## 1. Descargar la imagen del piloto desde Google Drive
 
-### Atajo: un único comando
+La imagen Docker (`huc-pilot-with-weights.tar.gz`, ~4,4 GB) está
+alojada en el Shared Drive de Lumen Network. Te he compartido la
+subcarpeta `Releases/DualPath-CRC/v1.0/` con permiso de lector. Tienes
+el link en el correo (o lo pides por WhatsApp).
 
-Si prefieres no hacer los 4 pasos manuales, hay un wrapper que los
-encadena con verificación intermedia. Abre WSL2 / Git Bash y ejecuta:
+Hay dos formas de descargarla: la **A** es la más sencilla (clic en
+navegador), la **B** es scripteable y la recomendada si vas a
+actualizar versiones en el futuro.
 
-```bash
-bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh /mnt/d/huc-pilot-with-weights.tar.gz
+### Opción A — Descarga manual desde navegador
+
+1. Abre el link de Google Drive en Firefox o Chrome.
+2. Sobre el fichero `huc-pilot-with-weights.tar.gz`, clic derecho →
+   **"Descargar"**.
+3. Google avisa de "No se puede analizar virus, ¿continuar?" → confirma.
+4. Espera 5-15 min (depende de la red del HUC; son ~4,4 GB).
+5. Descarga también el fichero `huc-pilot-with-weights.tar.gz.sha256`
+   de la misma carpeta (~100 bytes, instantáneo).
+6. Mueve ambos a `~/huc-tfm-pilot/`:
+
+```
+mv ~/Descargas/huc-pilot-with-weights.tar.gz* ~/huc-tfm-pilot/
+cd ~/huc-tfm-pilot/
 ```
 
-Te imprime el progreso de cada paso. Si todo va bien, termina con un
-mensaje verde **"✅ Despliegue completo"** y la app accesible en
-`http://localhost:8501`.
+### Opción B — Descarga scripteable con `gdown`
 
-Si prefieres ir paso a paso (recomendado la primera vez para entender
-qué hace cada comando), sigue las secciones 1.1 a 2.3 a continuación.
+Útil si vas a actualizar a versiones futuras o no quieres usar
+navegador. Requiere `gdown` (instalación una vez, 30 s):
 
-### Paso a paso (versión larga)
+```
+sudo apt install -y python3-pip
+pip install gdown
+```
 
-Abre PowerShell y ejecuta, comando por comando:
+Luego, con el **ID del fichero** que te paso por separado:
 
-```bash
-# 1.1. Cambiar al directorio del USB
-cd D:\
+```
+cd ~/huc-tfm-pilot/
+gdown --fuzzy "https://drive.google.com/file/d/<FILE_ID>/view" -O huc-pilot-with-weights.tar.gz
+gdown --fuzzy "https://drive.google.com/file/d/<SHA_ID>/view" -O huc-pilot-with-weights.tar.gz.sha256
+```
 
-# 1.2. Verificar integridad del fichero (debe tardar 30-60 segundos)
+(Te enviaré `<FILE_ID>` y `<SHA_ID>` por separado, no van en este doc.)
+
+### Verificar integridad
+
+Una vez descargado, asegúrate de que el fichero no se corrompió:
+
+```
 sha256sum -c huc-pilot-with-weights.tar.gz.sha256
 ```
 
 → Debe imprimir: `huc-pilot-with-weights.tar.gz: OK`
 
-Si dice `FAILED`, el USB se corrompió en la transferencia. Llámame.
+Si dice `FAILED`, vuelve a descargar (la red del HUC puede haber
+cortado).
 
-```bash
-# 1.3. Cargar la imagen al daemon Docker (tarda 2-5 minutos)
+## 2. Despliegue: opción atajo o paso a paso
+
+### Atajo — un único comando
+
+Si todo lo anterior está correcto, ejecuta el wrapper:
+
+```
+bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh ~/huc-tfm-pilot/huc-pilot-with-weights.tar.gz
+```
+
+El script hace los 4 pasos manuales (verificación + load + tag +
+`docker compose up`) en una sola invocación, con progreso visible.
+Termina con un mensaje verde **"✅ Despliegue completo"** y la app
+accesible en `http://localhost:8501`.
+
+**Alternativa moderna del script** — si quieres que el script también
+descargue de Drive (no solo cargue un fichero local):
+
+```
+bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh "https://drive.google.com/file/d/<FILE_ID>/view"
+```
+
+El script detecta que es un link de Drive, descarga + verifica +
+carga. Útil para actualizaciones futuras: un solo comando, recibes
+link nuevo, lo lanzas. Requiere `gdown` instalado (ver §1.B).
+
+### Paso a paso (versión larga, recomendada la primera vez)
+
+Si prefieres ir comando por comando para entender qué hace cada uno:
+
+```
+# 2.1. Cargar la imagen al daemon Docker (tarda 2-5 min)
+cd ~/huc-tfm-pilot/
 docker load -i huc-pilot-with-weights.tar.gz
 ```
 
-→ Debería terminar con: `Loaded image: huc-pilot:dev-with-weights`
+→ Debe terminar con: `Loaded image: huc-pilot:dev-with-weights`
 
-```bash
-# 1.4. Renombrar la imagen (para que docker-compose la reconozca)
+```
+# 2.2. Renombrar la imagen (para que docker compose la reconozca)
 docker tag huc-pilot:dev-with-weights huc-pilot:dev
 ```
 
 → Sin salida. Es normal.
 
-## 2. Lanzar el piloto
-
-```bash
-# 2.1. Cambiar al directorio del repositorio del piloto (donde lo
-#      tengas clonado o copiado del USB; ajusta la ruta).
-cd C:\Users\PC\huc-tfm-pilot\pilot
 ```
-
-```bash
-# 2.2. Levantar todos los servicios en segundo plano
+# 2.3. Levantar todos los servicios en segundo plano
+cd ~/huc-tfm-pilot/pilot
 docker compose up -d
 ```
 
 → Tres líneas tipo `Container huc-pilot-XXX Started`.
 
-```bash
-# 2.3. Comprobar que arrancó bien (espera 10 segundos antes)
+```
+# 2.4. Comprobar que arrancó bien (espera 10 segundos antes)
+sleep 10
 docker compose logs app --tail=20
 ```
 
@@ -106,7 +154,7 @@ mándamela.
 
 ## 3. Abrir y usar el piloto
 
-Abre el navegador (Edge o Firefox) y ve a:
+Abre Firefox y ve a:
 
 ```
 http://localhost:8501
@@ -120,32 +168,34 @@ A partir de aquí, sigue el flujo habitual que ya conoces:
 3. Esperar inferencia.
 4. Hacer correcciones en el visor.
 
-Para la **página `⚙️ Configuración`** (nueva), consulta
-`QA_EDUARDO.md` — explica TTL, estado del archive y acciones.
+Para la **página `⚙️ Configuración`**, consulta `QA_EDUARDO.md` —
+explica TTL, estado del archive y acciones.
 
 ## 4. Apagar al final de la jornada (opcional pero recomendado)
 
 Para no dejar el container corriendo durante la noche:
 
-```bash
-cd C:\Users\PC\huc-tfm-pilot\pilot
+```
+cd ~/huc-tfm-pilot/pilot
 docker compose down
 ```
 
 La próxima vez que quieras usar el piloto, solo necesitas repetir
-**`docker compose up -d`** (el `docker load` de la sección 1 es
-único; la imagen ya está cargada en Docker desde entonces).
+**`docker compose up -d`** (la imagen ya está cargada en Docker desde
+el primer deploy).
 
-## 5. Si algo falla — los errores típicos
+## 5. Si algo falla — errores típicos
 
 | Mensaje exacto | Qué pasa | Qué hacer |
 |---|---|---|
-| `'docker' no se reconoce como un comando` | Docker no instalado | Avisar IT del HUC o Nasser |
-| `sha256sum: FAILED` | USB corrupto | Pedir un USB nuevo |
-| `Cannot connect to the Docker daemon` | Docker no arrancó | Abrir Docker Desktop; esperar a que la ballenita verde aparezca |
-| `Could not select device driver "nvidia"` | NVIDIA Container Toolkit no configurado | Avisar IT del HUC |
-| `bind: address already in use` | Puerto 80/443 ocupado | Avisar a Nasser |
-| `out of disk space` | Sin espacio para la imagen (~14 GB) | Liberar espacio en `C:` |
+| `'docker' no se reconoce` o `command not found` | Docker no instalado | Avisar a Nasser |
+| `sha256sum: FAILED` | Descarga corrupta | Volver a descargar |
+| `Cannot connect to the Docker daemon` | Docker daemon no arrancado | `sudo systemctl start docker` |
+| `Could not select device driver "nvidia"` | NVIDIA Container Toolkit mal configurado | Avisar a Nasser |
+| `bind: address already in use` | Puerto 80/443/8501 ocupado | `docker compose down` y reintentar |
+| `out of disk space` | Sin espacio para la imagen (~14 GB) | Liberar espacio en `~` |
+| `gdown: command not found` | `gdown` no instalado | `pip install gdown` |
+| `Permission denied (write)` al hacer `mv` | Permisos en `~/huc-tfm-pilot/` | Verifica que la carpeta es tuya: `chown -R eduardo:eduardo ~/huc-tfm-pilot/` |
 
 Si el mensaje **no es ninguno de estos**, hazme una captura entera
 del terminal (con el comando que ejecutaste arriba y el error abajo)
@@ -155,17 +205,24 @@ y mándamela.
 
 Después de la defensa, cuando reentrenemos el modelo con las
 correcciones acumuladas (Hito 2 del módulo de aprendizaje), te
-mandaré un USB nuevo con un `.tar.gz` actualizado. El procedimiento
-para actualizar es **idéntico al paso 1**: cargar la nueva imagen,
-renombrarla, y `docker compose up -d` lo recoge automáticamente.
+mandaré por WhatsApp el **link nuevo de Drive** apuntando a la nueva
+versión (`Releases/DualPath-CRC/v1.1/`, etc.).
 
-No hace falta desinstalar la versión vieja; Docker mantiene ambas y
-puedes alternar si fuera necesario.
+El procedimiento de actualización es **idéntico al de la primera
+vez**: descargas (manual o con `gdown`), verificas sha256, ejecutas
+`huc-deploy.sh` apuntando al nuevo `.tar.gz`. Docker reemplaza la
+imagen vieja automáticamente; no hace falta desinstalar nada.
+
+**Atajo moderno** — si tienes `gdown` instalado, una sola línea:
+
+```
+bash ~/huc-tfm-pilot/pilot/scripts/huc-deploy.sh "<LINK_NUEVO_DRIVE>"
+```
 
 ## Contacto
 
 Si en cualquier paso algo no es claro o aparece un error que no
 sabes interpretar, llámame o mándame WhatsApp con la captura. La
-mayoría de problemas se resuelven en 10 minutos por video-llamada.
+mayoría de problemas se resuelven en 10 minutos por videollamada.
 
 — Nasser
