@@ -81,6 +81,23 @@ docker ps
 → Debe aparecer una línea con `huc-pilot` en estado `Up X seconds`,
 puerto `0.0.0.0:8501->8501/tcp`.
 
+### 1.8 (opcional) — Liberar 4,4 GB del home
+
+Después de `docker ps` confirme que el container está `Up`, el
+`.tar.gz` ya no se necesita: la imagen vive en el almacén interno de
+Docker (`/var/lib/docker/...`), independiente del archivo de
+descarga. Si quieres liberar espacio del home:
+
+```
+rm ~/huc-pilot-with-weights.tar.gz
+rm ~/huc-pilot-with-weights.tar.gz.sha256
+```
+
+Libera ~4,4 GB. **No es urgente** — en un PC con disco de 500 GB-1 TB
+no notarás la diferencia, y mantener el `.tar.gz` te ahorra una
+descarga si en algún momento necesitaras reinstalar la imagen sin
+internet. Decisión tuya.
+
 ## 2. Abrir y usar el piloto
 
 Abre Firefox o Chrome y ve a:
