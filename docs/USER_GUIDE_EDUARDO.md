@@ -68,8 +68,7 @@ docker tag huc-pilot:dev-with-weights huc-pilot:dev
 docker run -d \
   --name huc-pilot \
   --gpus all \
-  -p 8501:8501 \
-  -p 8888:8888 \
+  -p 80:80 \
   -v ~/huc-pilot-data/archive:/var/archive \
   -v ~/huc-pilot-data/queue:/tmp/queue \
   --restart unless-stopped \
@@ -80,9 +79,9 @@ docker ps
 ```
 
 → Debe aparecer una línea con `huc-pilot` en estado `Up X seconds` y
-**ambos puertos** mapeados: `0.0.0.0:8501->8501/tcp` (Streamlit) y
-`0.0.0.0:8888->8888/tcp` (servidor interno de tiles del visor
-OpenSeadragon).
+el puerto 80 mapeado: `0.0.0.0:80->80/tcp`. Dentro del container,
+nginx multiplexa Streamlit y los tiles del visor — solo hay un único
+puerto externo, mucho más simple que en versiones anteriores.
 
 ### 1.8 (opcional) — Liberar 4,4 GB del home
 
@@ -106,7 +105,7 @@ internet. Decisión tuya.
 Abre Firefox o Chrome y ve a:
 
 ```
-http://localhost:8501
+http://localhost
 ```
 
 A partir de aquí, sigue el flujo habitual que ya conoces:
@@ -139,7 +138,9 @@ docker start huc-pilot
 ```
 
 Reanuda el container con todo su estado. La app vuelve a estar
-accesible en `http://localhost:8501` en pocos segundos.
+accesible en `http://localhost` en pocos segundos (nginx interno
+arranca casi instantáneo, Streamlit detrás tarda ~5-10 s en estar
+listo para servir requests).
 
 ### Ver logs en tiempo real
 
@@ -168,8 +169,8 @@ Equivalente a `stop` + `start` en un comando.
 | `sha256sum: FAILED` | Descarga corrupta | Volver a descargar el `.tar.gz` |
 | `Cannot connect to the Docker daemon` | Docker daemon no arrancado | `sudo systemctl start docker` |
 | `Could not select device driver "nvidia"` | NVIDIA Container Toolkit mal configurado | Avisar a Nasser |
-| `bind: address already in use` (puerto 8501 u 8888) | Otro proceso usa el puerto | `docker stop huc-pilot` y reintentar, o `lsof -i :8501` / `lsof -i :8888` para ver qué lo ocupa |
-| `Unable to open [object Object]: Unable to load TileSource` en el visor | El sidecar de tiles (puerto 8888) no responde | Verifica con `docker ps` que aparece `0.0.0.0:8888->8888/tcp`. Si falta, el container se lanzó sin `-p 8888:8888` — reintentar el `docker run` con esa flag |
+| `bind: address already in use` (puerto 80) | Otro proceso usa el puerto 80 (puede ser otro nginx, apache, o algún servicio web del HUC PC) | Cambiar a un puerto alto: `docker run ... -p 8080:80 ...` y acceder a `http://localhost:8080`. O identificar qué ocupa el 80 con `sudo lsof -i :80` y pararlo. |
+| `Unable to open [object Object]: Unable to load TileSource` en el visor | nginx interno no está sirviendo los DZIs correctamente | Verificar con `docker exec huc-pilot ls /tmp/queue` que hay carpetas de jobs procesados. Si están vacías, el problema es del worker. Si están, capturar `docker logs huc-pilot --tail 50` y enviar a Nasser. |
 | `out of disk space` | Sin espacio para la imagen (~14 GB tras `docker load`) | Liberar espacio en `~` |
 | `docker: Error response from daemon: ... already in use by container` | Hay un container viejo con ese nombre | `docker rm huc-pilot` y reintentar el `docker run` |
 | `Permission denied (write)` al hacer `mkdir` | Permisos en `~` | Verifica que el directorio home es tuyo: `ls -ld ~` |
@@ -210,8 +211,7 @@ docker tag huc-pilot:dev-with-weights huc-pilot:dev
 docker run -d \
   --name huc-pilot \
   --gpus all \
-  -p 8501:8501 \
-  -p 8888:8888 \
+  -p 80:80 \
   -v ~/huc-pilot-data/archive:/var/archive \
   -v ~/huc-pilot-data/queue:/tmp/queue \
   --restart unless-stopped \

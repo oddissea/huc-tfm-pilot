@@ -1,31 +1,46 @@
 #!/bin/bash
-# Entrypoint del container huc-pilot.
+# Entrypoint del container huc-pilot (v1.0.3+).
 #
-# Lanza serve_dzi.py en background (puerto 8888, sirve tiles DZI a
-# OpenSeadragon) + streamlit en foreground (puerto 8501).
+# Lanza nginx en background (puerto 80, multiplexa Streamlit + DZIs) +
+# streamlit en foreground (127.0.0.1:8501, solo accesible para nginx
+# interno, NO expuesto al host).
 #
-# Sustituye al CMD original "streamlit run app.py ..." en el flujo
-# despliegue HUC PC sin nginx ni docker compose. En el despliegue cloud
-# con docker compose + nginx, este entrypoint también funciona (el
-# serve_dzi en background no estorba, nginx puede seguir sirviendo
-# `/dzi/` desde fuera del container si así lo prefieres).
+# Arquitectura interna:
 #
-# El container debe exponer ambos puertos:
-#   docker run -p 8501:8501 -p 8888:8888 ...
+#   browser (Eduardo en HUC PC)
+#         │
+#         ▼
+#   host:80 ◄──── docker -p 80:80 (o -p 8080:80)
+#         │
+#         ▼
+#   nginx (escucha en 80, dentro del container)
+#     ├── location /     → proxy a 127.0.0.1:8501 (Streamlit)
+#     └── location /dzi/ → alias /tmp/queue/ (static, DZIs y tiles)
+#
+# Beneficio: Streamlit y DZIs bajo el MISMO origen → cero CORS issues.
+# Replica el setup de la VM cloud sin necesidad de docker compose ni
+# certbot (no necesitamos TLS en local).
+#
+# El container expone solo puerto 80:
+#   docker run -p 80:80 ... (o -p 8080:80 si 80 está ocupado en el host)
 #
 # Si streamlit muere, el container termina (entrypoint hace `exec`).
-# Eso permite que `--restart unless-stopped` relance limpiamente.
+# `--restart unless-stopped` lo relanza limpiamente.
 
 set -e
 
 # Aseguramos que existe el directorio raíz de DZIs antes de arrancar
-# serve_dzi (JobManager también lo crea, pero hay race con Streamlit).
-mkdir -p /tmp/queue
+# nginx (JobManager también lo crea, pero hay race con Streamlit).
+mkdir -p /tmp/queue /var/log/nginx
 
-# Servidor DZI en background. Logs a stdout del container (visible con
-# `docker logs huc-pilot`).
-python /app/scripts/serve_dzi.py &
+# nginx en background. -g "daemon off;" mantiene el proceso en
+# foreground del shell, pero con & queda en background del entrypoint.
+# Logs van a /var/log/nginx/{access,error}.log dentro del container
+# (visibles con `docker exec huc-pilot tail -f /var/log/nginx/access.log`).
+nginx -g "daemon off;" &
 
-# Streamlit en foreground. exec sustituye el shell por streamlit → PID 1
-# del container, los signals (SIGTERM al docker stop) se propagan bien.
-exec streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+# Streamlit en foreground bindeando a 127.0.0.1 — NO 0.0.0.0. Eso
+# significa que Streamlit solo es accesible desde dentro del container
+# (donde nginx vive). nginx hace proxy en /. El usuario externo solo
+# accede via nginx (puerto 80), nunca directo a Streamlit (puerto 8501).
+exec streamlit run app.py --server.port=8501 --server.address=127.0.0.1
