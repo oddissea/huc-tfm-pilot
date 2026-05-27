@@ -111,8 +111,8 @@ Ruta: `Releases/DualPath-CRC/v1.0.3/`.
 
 | Fichero | FILE_ID | URL |
 |---|---|---|
-| `huc-pilot-with-weights-v1.0.3.tar.gz` | _(pendiente subir)_ | _(pendiente)_ |
-| `huc-pilot-with-weights-v1.0.3.tar.gz.sha256` | _(pendiente subir)_ | _(pendiente)_ |
+| `huc-pilot-with-weights-v1.0.3.tar.gz` | `1BLKKtv2qftUx0maX7h-p512b53nE4LRD` | https://drive.google.com/file/d/1BLKKtv2qftUx0maX7h-p512b53nE4LRD/view |
+| `huc-pilot-with-weights-v1.0.3.tar.gz.sha256` | `1nTHE7jCcbxl1W86lfNYpFu5MkObUdGQB` | https://drive.google.com/file/d/1nTHE7jCcbxl1W86lfNYpFu5MkObUdGQB/view |
 
 ### Procedimiento de upgrade para Eduardo (desde cualquier versión previa)
 
@@ -123,12 +123,12 @@ Ruta: `Releases/DualPath-CRC/v1.0.3/`.
    docker stop huc-pilot && docker rm huc-pilot
    ```
 
-2. Descargar la nueva versión (FILE_IDs pendientes de subir):
+2. Descargar la nueva versión:
 
    ```
    cd ~
-   gdown "<NUEVO_TAR_ID_v1.0.3>" -O huc-pilot-with-weights.tar.gz
-   gdown "<NUEVO_SHA_ID_v1.0.3>" -O huc-pilot-with-weights.tar.gz.sha256
+   gdown "1BLKKtv2qftUx0maX7h-p512b53nE4LRD" -O huc-pilot-with-weights.tar.gz
+   gdown "1nTHE7jCcbxl1W86lfNYpFu5MkObUdGQB" -O huc-pilot-with-weights.tar.gz.sha256
    sha256sum -c huc-pilot-with-weights.tar.gz.sha256
    ```
 
