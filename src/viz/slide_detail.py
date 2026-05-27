@@ -650,7 +650,14 @@ def _render_openseadragon_viewer(
         immediateRender: true,
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
-        ajaxWithCredentials: true,
+        // ajaxWithCredentials: false en deploys con `Allow-Origin: *`
+        // (sidecar serve_dzi.py o nginx). Si fuera true con wildcard, el
+        // browser rechaza la respuesta por spec CORS y aparece HTTP 0
+        // en consola. En el deploy cloud original con Basic Auth detrás
+        // de nginx, las credenciales viajaban en cookies del dominio
+        // (no en este header), por lo que ponerlo a false aquí no rompe
+        // ese flujo. Mantener false como default.
+        ajaxWithCredentials: false,
         // Permite hacer zoom hasta 5× más allá de la resolución nativa de
         // los tiles (por defecto 1.1x). El patólogo puede inspeccionar
         // morfología fina sin necesidad del panel del inspector aparte.

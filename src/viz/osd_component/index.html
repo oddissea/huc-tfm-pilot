@@ -348,7 +348,10 @@
         immediateRender: true,
         crossOriginPolicy: "Anonymous",
         loadTilesWithAjax: true,
-        ajaxWithCredentials: true,
+        // ajaxWithCredentials: false con sidecar serve_dzi.py que manda
+        // Allow-Origin: *. Si fuera true, el browser rechaza la respuesta
+        // por spec CORS (incompatibilidad wildcard + credentials) → HTTP 0.
+        ajaxWithCredentials: false,
         maxZoomPixelRatio: 5,
       });
 
