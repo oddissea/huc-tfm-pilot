@@ -82,11 +82,28 @@ y la app levanta, **no** que el bug desaparezca.
 
 ### 📦 Artefactos en Drive
 
-- _(Pendiente: build de distribución no generado todavía — esta versión
-  se construyó y probó localmente, sin distribuir. Al publicar: carpeta
-  `Releases/DualPath-CRC/v1.0.4/` con `huc-pilot-v1.0.4.tar.gz` +
-  `.sha256` y sus FILE_IDs.)_
+Shared Drive "Lumen Network", carpeta `Releases/DualPath-CRC/v1.0.4/`:
 
+| Fichero | FILE_ID | URL |
+|---|---|---|
+| `huc-pilot-with-weights-v1.0.4.tar.gz` | `1FVnFE0SU0QowQZwWIX0pzQ6Q1nGdmWov` | https://drive.google.com/file/d/1FVnFE0SU0QowQZwWIX0pzQ6Q1nGdmWov/view |
+| `huc-pilot-with-weights-v1.0.4.tar.gz.sha256` | `1Ue8UB1nkJTnBOCnNWfLTYLTcWKIPf07y` | https://drive.google.com/file/d/1Ue8UB1nkJTnBOCnNWfLTYLTcWKIPf07y/view |
+
+- `sha256`: `42593581238bec74464c808b2afd2479ac1763104071ae172acd42b5396bedf0`
+  (referencia el nombre canónico `huc-pilot-with-weights.tar.gz`).
+- Imagen `linux/amd64`, apta para el HUC PC (Ubuntu x86 + RTX 5070).
+- Descarga + verificación validadas (`gdown` + `sha256sum -c` → `…OK`).
+
+### 🚀 Instalación / actualización en el HUC PC
+
+Nuevo script `scripts/install_huc.sh` — hace todo el ciclo en un comando
+(para+elimina el container conservando datos, descarga por FILE_ID,
+verifica sha256, carga, lanza en `:80`, comprueba salud):
+
+```bash
+bash install_huc.sh                 # instala/actualiza a esta versión
+bash install_huc.sh --purge-images  # además borra imágenes viejas (~14 GB)
+bash install_huc.sh --port 8080     # si el puerto 80 está ocupado
 ```
-(detalle en SESSION_LOG.md, sesión #73/#74)
-```
+
+Los FILE_IDs de esta versión ya vienen escritos en el script.

@@ -27,30 +27,82 @@ docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 Si en lugar de la tabla sale `Could not select device driver "nvidia"`
 o `'docker' no se reconoce` → **avísame** antes de continuar.
 
-## 1. Deploy inicial — un único bloque copy-paste
+## 1. Instalar o actualizar el piloto
 
-Abre terminal y pega los comandos siguientes (todos a la vez o uno a
-uno, ambas formas funcionan):
+Tienes dos caminos. **El A (recomendado) es el script automático**; el
+B es el manual de siempre por si prefieres ver cada paso.
+
+---
+
+### Camino A (recomendado) — script automático
+
+Te paso el fichero **`install_huc.sh`** por WhatsApp (también está en el
+repo, en `pilot/scripts/install_huc.sh`). Guárdalo en tu carpeta
+personal (`~`) y ejecuta:
 
 ```
-# 1.1. Instalar gdown (para descargar la imagen desde Google Drive)
+# A.1. (solo la primera vez) instalar gdown, que descarga de Google Drive
 sudo apt install -y pipx
 pipx install gdown
 export PATH="$HOME/.local/bin:$PATH"
 
-# 1.2. Crear directorios de datos persistentes
+# A.2. lanzar el instalador (ya trae dentro los FILE_IDs de esta versión)
+bash install_huc.sh
+```
+
+Eso es todo. El script hace el ciclo completo por ti:
+
+1. Para y elimina el container anterior (**tus correcciones y jobs en
+   `~/huc-pilot-data/` se conservan**).
+2. Descarga la imagen desde el Drive de Lumen Network (~4,4 GB, 5-15 min).
+3. Verifica la integridad con `sha256` (si la descarga se corta, te
+   avisa y para — no instala nada corrupto).
+4. Carga la imagen y arranca el piloto en el **puerto 80**.
+5. Comprueba que la app responde y te lo confirma.
+
+Opciones útiles:
+
+```
+# Además borra las imágenes viejas del piloto y libera ~14 GB de disco:
+bash install_huc.sh --purge-images
+
+# Si el puerto 80 del HUC PC está ocupado por otro servicio:
+bash install_huc.sh --port 8080      # luego abre http://localhost:8080
+```
+
+Cuando termine, abre el navegador en **`http://localhost`** y salta al
+punto **2** de esta guía.
+
+> Si el script se detiene con un mensaje en rojo (`ERROR: …`), léelo: te
+> dice exactamente qué falta (Docker parado, gdown sin instalar, sha
+> incorrecto…). La tabla de la sección **4** cubre los casos típicos.
+
+---
+
+### Camino B (manual) — paso a paso
+
+Si prefieres ejecutar cada comando a mano, pega lo siguiente (todo a la
+vez o uno a uno, ambas formas funcionan):
+
+```
+# B.1. Instalar gdown (para descargar la imagen desde Google Drive)
+sudo apt install -y pipx
+pipx install gdown
+export PATH="$HOME/.local/bin:$PATH"
+
+# B.2. Crear directorios de datos persistentes
 #      Aquí guardará el piloto las correcciones del patólogo y la cola
 #      de jobs procesados. Sobreviven aunque pares/elimines el container.
 mkdir -p ~/huc-pilot-data/archive ~/huc-pilot-data/queue
 
-# 1.3. Descargar la imagen Docker y su checksum desde el Shared Drive
+# B.3. Descargar la imagen Docker y su checksum desde el Shared Drive
 #      de Lumen Network. La imagen son ~4,4 GB → tarda 5-15 min según
 #      la conexión del HUC. El .sha256 son 96 bytes, instantáneo.
 cd ~
-gdown "1iR8AHCIofHCfOwQilkD3q3z7mmCs3Fu0" -O huc-pilot-with-weights.tar.gz
-gdown "1A9B1xTTN_A1l5MGpHnloqhMsIJaEL6OI" -O huc-pilot-with-weights.tar.gz.sha256
+gdown "1FVnFE0SU0QowQZwWIX0pzQ6Q1nGdmWov" -O huc-pilot-with-weights.tar.gz
+gdown "1Ue8UB1nkJTnBOCnNWfLTYLTcWKIPf07y" -O huc-pilot-with-weights.tar.gz.sha256
 
-# 1.4. Verificar integridad del fichero (tarda 30-60 segundos)
+# B.4. Verificar integridad del fichero (tarda 30-60 segundos)
 sha256sum -c huc-pilot-with-weights.tar.gz.sha256
 ```
 
@@ -60,11 +112,11 @@ Si dice `FAILED`, vuelve a ejecutar la descarga (la red del HUC pudo
 haber cortado en medio).
 
 ```
-# 1.5. Cargar la imagen al daemon Docker (tarda 2-5 minutos)
+# B.5. Cargar la imagen al daemon Docker (tarda 2-5 minutos)
 docker load -i huc-pilot-with-weights.tar.gz
 docker tag huc-pilot:dev-with-weights huc-pilot:dev
 
-# 1.6. Lanzar el container
+# B.6. Lanzar el container
 docker run -d \
   --name huc-pilot \
   --gpus all \
@@ -74,7 +126,7 @@ docker run -d \
   --restart unless-stopped \
   huc-pilot:dev
 
-# 1.7. Confirmar que arrancó
+# B.7. Confirmar que arrancó
 docker ps
 ```
 
@@ -83,9 +135,9 @@ el puerto 80 mapeado: `0.0.0.0:80->80/tcp`. Dentro del container,
 nginx multiplexa Streamlit y los tiles del visor — solo hay un único
 puerto externo, mucho más simple que en versiones anteriores.
 
-### 1.8 (opcional) — Liberar 4,4 GB del home
+#### B.8 (opcional) — Liberar 4,4 GB del home
 
-Después de `docker ps` confirme que el container está `Up`, el
+Después de que `docker ps` confirme que el container está `Up`, el
 `.tar.gz` ya no se necesita: la imagen vive en el almacén interno de
 Docker (`/var/lib/docker/...`), independiente del archivo de
 descarga. Si quieres liberar espacio del home:
@@ -112,7 +164,8 @@ A partir de aquí, sigue el flujo habitual que ya conoces:
 
 1. Sidebar → **"Cargar modelos"** (debería ser inmediato; los pesos
    ya están dentro de la imagen).
-2. Subir un slide TIFF.
+2. Subir un slide TIFF (**ya puedes subir varios a la vez** — esta
+   versión arregla el fallo de la subida múltiple).
 3. Esperar inferencia.
 4. Hacer correcciones en el visor.
 
@@ -166,60 +219,42 @@ Equivalente a `stop` + `start` en un comando.
 | `'docker' no se reconoce` o `command not found` | Docker no instalado | Avisar a Nasser |
 | `gdown: command not found` | gdown no instalado | Reintentar `pipx install gdown && export PATH="$HOME/.local/bin:$PATH"` |
 | `error: externally-managed-environment` al hacer `pip install gdown` | Ubuntu 24.04 protege Python sistema | Usa `pipx install gdown` en lugar de `pip install gdown` |
-| `sha256sum: FAILED` | Descarga corrupta | Volver a descargar el `.tar.gz` |
+| `sha256sum: FAILED` | Descarga corrupta | Volver a descargar el `.tar.gz` (o relanzar `install_huc.sh`) |
 | `Cannot connect to the Docker daemon` | Docker daemon no arrancado | `sudo systemctl start docker` |
 | `Could not select device driver "nvidia"` | NVIDIA Container Toolkit mal configurado | Avisar a Nasser |
-| `bind: address already in use` (puerto 80) | Otro proceso usa el puerto 80 (puede ser otro nginx, apache, o algún servicio web del HUC PC) | Cambiar a un puerto alto: `docker run ... -p 8080:80 ...` y acceder a `http://localhost:8080`. O identificar qué ocupa el 80 con `sudo lsof -i :80` y pararlo. |
-| `Unable to open [object Object]: Unable to load TileSource` en el visor | nginx interno no está sirviendo los DZIs correctamente | Verificar con `docker exec huc-pilot ls /tmp/queue` que hay carpetas de jobs procesados. Si están vacías, el problema es del worker. Si están, capturar `docker logs huc-pilot --tail 50` y enviar a Nasser. |
-| `out of disk space` | Sin espacio para la imagen (~14 GB tras `docker load`) | Liberar espacio en `~` |
-| `docker: Error response from daemon: ... already in use by container` | Hay un container viejo con ese nombre | `docker rm huc-pilot` y reintentar el `docker run` |
-| `Permission denied (write)` al hacer `mkdir` | Permisos en `~` | Verifica que el directorio home es tuyo: `ls -ld ~` |
+| `bind: address already in use` (puerto 80) | Otro proceso usa el puerto 80 (otro nginx, apache, o un servicio web del HUC PC) | Con el script: `bash install_huc.sh --port 8080` y abrir `http://localhost:8080`. A mano: `docker run ... -p 8080:80 ...`. O ver qué ocupa el 80 con `sudo lsof -i :80` y pararlo. |
+| `Unable to open [object Object]: Unable to load TileSource` en el visor | nginx interno no sirve los DZIs | Verificar con `docker exec huc-pilot ls /tmp/queue` que hay carpetas de jobs. Si están vacías, es el worker. Si están, capturar `docker logs huc-pilot --tail 50` y enviar a Nasser. |
+| `out of disk space` | Sin espacio para la imagen (~14 GB tras `docker load`) | Liberar espacio en `~`, o relanzar con `bash install_huc.sh --purge-images` |
+| `docker: Error response from daemon: ... already in use by container` | Container viejo con ese nombre | `docker rm huc-pilot` y reintentar (el script lo hace solo) |
+| `Permission denied (write)` al hacer `mkdir` | Permisos en `~` | Verifica que el home es tuyo: `ls -ld ~` |
 
 Si el mensaje **no es ninguno de estos**, hazme una captura entera
 del terminal (con el comando que ejecutaste arriba y el error abajo)
 y mándamela por WhatsApp.
 
-## 5. Cuando llegue una versión nueva del modelo (post-defensa)
+## 5. Cuando llegue una versión nueva del modelo
 
-Después de la defensa, cuando reentrenemos el modelo con las
-correcciones acumuladas (Hito 2 del módulo de aprendizaje), te
-mandaré por WhatsApp:
-
-- Los nuevos **FILE_IDs** del `.tar.gz` y `.sha256` (cambian con cada
-  versión).
-- Un link al `CHANGELOG.md` del Shared Drive con qué incluye la
-  versión nueva.
-
-El procedimiento de actualización es:
+El procedimiento de actualización es el **mismo** que el de instalación
+— vuelve a ejecutar el **Camino A**:
 
 ```
-# Eliminar el container viejo (las correcciones en ~/huc-pilot-data/
-# se conservan automáticamente).
-docker stop huc-pilot
-docker rm huc-pilot
-
-# Descargar nueva versión (sustituye <NUEVO_TAR_ID> y <NUEVO_SHA_ID>
-# por los que te pasaré).
-cd ~
-gdown "<NUEVO_TAR_ID>" -O huc-pilot-with-weights.tar.gz
-gdown "<NUEVO_SHA_ID>" -O huc-pilot-with-weights.tar.gz.sha256
-sha256sum -c huc-pilot-with-weights.tar.gz.sha256
-
-# Cargar y relanzar
-docker load -i huc-pilot-with-weights.tar.gz
-docker tag huc-pilot:dev-with-weights huc-pilot:dev
-docker run -d \
-  --name huc-pilot \
-  --gpus all \
-  -p 80:80 \
-  -v ~/huc-pilot-data/archive:/var/archive \
-  -v ~/huc-pilot-data/queue:/tmp/queue \
-  --restart unless-stopped \
-  huc-pilot:dev
+bash install_huc.sh --purge-images
 ```
 
-Los volúmenes `archive/` y `queue/` se reusan automáticamente entre
-versiones, así que las correcciones que hiciste antes siguen ahí.
+(El `--purge-images` borra la imagen vieja antes de cargar la nueva, así
+no se te acumulan 14 GB por versión. Tus correcciones en
+`~/huc-pilot-data/` se conservan siempre.)
+
+Si te mando una versión con **FILE_IDs distintos** y un `install_huc.sh`
+nuevo, simplemente usa el script nuevo. Si prefieres no cambiar de
+script, también puedes pasárselos por variables de entorno:
+
+```
+TAR_FILE_ID="<NUEVO_TAR_ID>" SHA_FILE_ID="<NUEVO_SHA_ID>" bash install_huc.sh --purge-images
+```
+
+Y si quieres hacerlo **a mano** (Camino B), repite los pasos B.1–B.7
+sustituyendo los dos FILE_IDs del paso B.3 por los que te pase.
 
 ## Contacto
 

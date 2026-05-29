@@ -24,8 +24,8 @@
 #
 # ── FILE_IDs de la versión a instalar (Google Drive) ───────────────────
 # Nasser los rellena con cada release y te pasa el script ya listo.
-TAR_FILE_ID="${TAR_FILE_ID:-PEGAR_FILE_ID_DEL_TAR_GZ}"
-SHA_FILE_ID="${SHA_FILE_ID:-PEGAR_FILE_ID_DEL_SHA256}"
+TAR_FILE_ID="${TAR_FILE_ID:-1FVnFE0SU0QowQZwWIX0pzQ6Q1nGdmWov}"
+SHA_FILE_ID="${SHA_FILE_ID:-1Ue8UB1nkJTnBOCnNWfLTYLTcWKIPf07y}"
 VERSION_LABEL="${VERSION_LABEL:-v1.0.4}"
 # ───────────────────────────────────────────────────────────────────────
 
