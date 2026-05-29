@@ -27,6 +27,27 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ── Fix v1.0.4: WebSocket que se cae durante la subida multi-archivo ──
+# Streamlit 1.40.2 fija websocket_ping_interval=1 (server.py). Tornado 6.5
+# capa el ping_timeout AL interval, así que el timeout efectivo es 1 s:
+# cualquier stall del IOLoop > 1 s (carga de modelos en el primer run +
+# parseo de cuerpos de TIFF grandes) hace que Tornado dé el WebSocket por
+# muerto → disconnect_session → la sesión sale del registro de activas →
+# los PUT de /_stcore/upload_file dan «400: Invalid session_id». Por eso,
+# al subir varios slides a la vez, sobrevivía solo uno por tanda.
+# Réplica del fix oficial (streamlit#11693): subir el ping_interval a 30.
+# El assert rompe el build si el patrón desaparece (p.ej. al cambiar de
+# versión de Streamlit) para no enviar nunca una imagen sin parchear.
+RUN python - <<'PY'
+import pathlib, streamlit
+f = pathlib.Path(streamlit.__file__).parent / "web/server/server.py"
+s = f.read_text()
+patched = s.replace('"websocket_ping_interval": 1,', '"websocket_ping_interval": 30,')
+assert patched != s, "patch ping_interval NO aplicado (patrón no encontrado en server.py)"
+f.write_text(patched)
+print("[v1.0.4] websocket_ping_interval parcheado a 30")
+PY
+
 # Source code (model classes, tiff_to_h5).
 COPY src/ ./src/
 
