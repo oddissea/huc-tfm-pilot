@@ -117,10 +117,14 @@ docker load -i huc-pilot-with-weights.tar.gz
 docker tag huc-pilot:dev-with-weights huc-pilot:dev
 
 # B.6. Lanzar el container
+#      OJO al -p 127.0.0.1:80:80 -> el piloto solo será accesible desde
+#      ESTE ordenador, no desde otros equipos de la red. Es lo que quieres
+#      en una red compartida como la de la ULL. Si algún día necesitaras
+#      entrar desde otra máquina del grupo, cambia a "-p 80:80".
 docker run -d \
   --name huc-pilot \
   --gpus all \
-  -p 80:80 \
+  -p 127.0.0.1:80:80 \
   -v ~/huc-pilot-data/archive:/var/archive \
   -v ~/huc-pilot-data/queue:/tmp/queue \
   --restart unless-stopped \

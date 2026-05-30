@@ -18,6 +18,15 @@
 #   --port N         publica en el puerto N del host en vez del 80
 #                    (p. ej. --port 8080 si el 80 está ocupado).
 #   --keep-tar       no borra el .tar.gz descargado al terminar.
+#   --allow-lan      publica el piloto en TODA la red (no solo en esta
+#                    máquina). NO recomendado en redes inseguras: por
+#                    defecto el acceso queda restringido a localhost.
+#
+# SEGURIDAD: por defecto el piloto solo es accesible desde el propio PC
+# (127.0.0.1). En una red insegura (p. ej. la de la ULL) cualquier equipo
+# de la red podría abrir la app si se publicara en todas las interfaces;
+# por eso el binding por defecto es loopback. Usa --allow-lan solo si de
+# verdad necesitas entrar desde otra máquina del grupo.
 #
 # Requisitos (ya instalados en el HUC PC): Docker CE + NVIDIA Container
 # Toolkit + gdown. Si falta gdown:  sudo apt install -y pipx && pipx install gdown
@@ -97,11 +106,15 @@ log "Cargando la imagen en Docker (2-5 min)…"
 docker load -i "${TARBALL}"
 docker tag huc-pilot:dev-with-weights huc-pilot:dev
 
-log "Lanzando el container en el puerto ${HOST_PORT}…"
+if [[ -n "${BIND_ADDR}" ]]; then
+    log "Lanzando el container en http://localhost:${HOST_PORT} (solo esta máquina)…"
+else
+    log "Lanzando el container en el puerto ${HOST_PORT} ABIERTO A LA RED (--allow-lan)…"
+fi
 docker run -d \
     --name "${CONTAINER}" \
     --gpus all \
-    -p "${HOST_PORT}:80" \
+    -p "${BIND_ADDR}${HOST_PORT}:80" \
     -v "${DATA_DIR}/archive:/var/archive" \
     -v "${DATA_DIR}/queue:/tmp/queue" \
     --restart unless-stopped \
